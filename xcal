@@ -3,11 +3,12 @@
 # requires python3-tk, python3-numpy
 
 import re
+import numpy as np
 from subprocess import run, PIPE
 
 
-prop_name = 'libinput Calibration Matrix'
-
+# prop_name = 'libinput Calibration Matrix'
+prop_name = 'Coordinate Transformation Matrix'
 
 def xinput(*args):
     return run(args=('/usr/bin/xinput', *args),
@@ -28,7 +29,7 @@ def get_devs():
 def print_devs(devs):
     print('Pointer devices:')
     print('%4s %30s' % ('ID', 'Name'))
-    for i, name in devs.items():
+    for i, name in sorted(devs.items()):
         print('%4d %30s' % (i, name))
     print()
 
@@ -59,20 +60,10 @@ def read_cal(dev):
     line = re.search(prop_name + r'.*:\s+(\S.+)',
                      stdout)
     if not line:
-        print('Previous calibration unset')
-        return [1, 0, 0,
-                0, 1, 0,
-                0, 0, 1]
-    vals = [float(v) for v in line.group(1).split(', ')]
+        print('Cal property not set; is this an xinput device?')
+        exit(1)
+    vals = np.matrix(line.group(1)).reshape(3, 3)
     return vals
-
-
-def print_cal(cal):
-    for j in range(3):
-        for i in range(3):
-            print(' %.2f' % cal[3*j + i], end='')
-        print()
-    print()
 
 
 def ask(q):
@@ -150,7 +141,7 @@ def show_tk(n_points, old_cal=None, new_cal=None, test=False):
             # We had already drawn the target in red in the correct place
             # We need to draw the old-cal'd and new-cal'd points transforming
             # manually; the cal has not been used yet.
-        pass
+            pass
 
         canvas.create_line(X*point['sx'], Y*point['sy'], x, y, fill='black')
         cross(x, y, 'black')
@@ -168,7 +159,6 @@ def show_tk(n_points, old_cal=None, new_cal=None, test=False):
 
 
 def calibrate(points):
-    import numpy as np
     from math import log10
 
     m_screen = np.matrix([
@@ -197,7 +187,8 @@ def main():
 
     old_cal = read_cal(dev)
     print('Old calibration:')
-    print_cal(old_cal)
+    print(old_cal)
+    print()
 
     new_cal = None
     if ask('Calibrate?'):
@@ -208,8 +199,9 @@ def main():
         new_cal, quality = calibrate(points)
 
         print('New calibration:')
-        print(str(new_cal))
+        print(new_cal)
         print('Quality (should be at least 3): %.1f' % quality)
+        print()
 
     if ask('Test?'):
         n_points = choose_points()
