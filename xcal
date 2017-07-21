@@ -10,6 +10,7 @@ from subprocess import run, PIPE
 # prop_name = 'libinput Calibration Matrix'
 prop_name = 'Coordinate Transformation Matrix'
 
+
 def xinput(*args):
     return run(args=('/usr/bin/xinput', *args),
                stdout=PIPE, check=True,
@@ -95,10 +96,15 @@ def show_tk(n_points, old_cal=None, new_cal=None, test=False):
     from math import ceil, sqrt
 
     root = Tk()
+    X, Y = None, None
     root.attributes('-fullscreen', True)
-    X = root.winfo_screenwidth()
-    Y = root.winfo_screenheight()
     canvas = Canvas(root)
+
+    def resize(event):
+        nonlocal X, Y
+        X, Y = event.width, event.height
+        next_point()
+    canvas.bind('<Configure>', resize)
     canvas.pack(expand=True, fill='both')
 
     points = []
@@ -130,28 +136,40 @@ def show_tk(n_points, old_cal=None, new_cal=None, test=False):
 
     def cancel_cal(_):
         print('Calibration cancelled')
+        points.clear()
         root.destroy()
     root.bind('<Escape>', cancel_cal)
     canvas.bind('<Escape>', cancel_cal)
 
+    def transform(x, y, cal):
+        p = np.matrix([
+            [x/X],
+            [y/Y],
+            [1]
+        ])
+        out = np.matmul(cal, p)
+        return out.item(0)*X, out.item(1)*Y
+
     def click(event):
+        sx, sy = X*point['sx'], Y*point['sy']
         x, y = event.x, event.y
 
         if test:
-            # We had already drawn the target in red in the correct place
-            # We need to draw the old-cal'd and new-cal'd points transforming
-            # manually; the cal has not been used yet.
-            pass
+            ox, oy = transform(x, y, old_cal)
+            canvas.create_line(sx, sy, ox, oy, fill='brown')
+            cross(ox, oy, 'brown')
+            if new_cal is not None:
+                x, y = transform(x, y, new_cal)
 
-        canvas.create_line(X*point['sx'], Y*point['sy'], x, y, fill='black')
-        cross(x, y, 'black')
+        if (not test) or new_cal is not None:
+            canvas.create_line(sx, sy, x, y, fill='black')
+            cross(x, y, 'black')
         if not test:
             point.update({'mx': x/X, 'my': y/Y})
             points.append(point)
         next_point()
     canvas.bind('<Button-1>', click)
 
-    next_point()
     root.mainloop()
 
     if not test:
@@ -196,12 +214,13 @@ def main():
         print()
 
         points = show_tk(n_points)
-        new_cal, quality = calibrate(points)
+        if points:
+            new_cal, quality = calibrate(points)
 
-        print('New calibration:')
-        print(new_cal)
-        print('Quality (should be at least 3): %.1f' % quality)
-        print()
+            print('New calibration:')
+            print(new_cal)
+            print('Quality (should be at least 3): %.1f' % quality)
+            print()
 
     if ask('Test?'):
         n_points = choose_points()
