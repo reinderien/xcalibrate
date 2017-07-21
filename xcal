@@ -1,0 +1,221 @@
+#!/usr/bin/env python3
+
+# requires python3-tk, python3-numpy
+
+import re
+from subprocess import run, PIPE
+
+
+prop_name = 'libinput Calibration Matrix'
+
+
+def xinput(*args):
+    return run(args=('/usr/bin/xinput', *args),
+               stdout=PIPE, check=True,
+               universal_newlines=True).stdout
+
+
+def get_devs():
+    devs = {int(groups[1]): groups[0] for groups in
+            re.findall(r'↳ (\w.+\w)\s+id=(\d+)\D+slave *pointer',
+                       xinput('--list', '--short'))}
+    if not devs:
+        print('No suitable input devices found')
+        exit(1)
+    return devs
+
+
+def print_devs(devs):
+    print('Pointer devices:')
+    print('%4s %30s' % ('ID', 'Name'))
+    for i, name in devs.items():
+        print('%4d %30s' % (i, name))
+    print()
+
+
+def choose_preferred(devs):
+    preferred = [i for (i, n) in devs.items()
+                 if 'touch' in n.lower()]
+    if preferred:
+        return preferred[0]
+    return next(iter(devs.keys()))
+
+
+def choose_dev(devs, preferred):
+    while True:
+        devstr = input('Device to calibrate [%d]: ' % preferred)
+        if not devstr:
+            return preferred
+        try:
+            dev = int(devstr)
+        except ValueError:
+            continue
+        if dev in devs.keys():
+            return dev
+
+
+def read_cal(dev):
+    stdout = xinput('--list-props', str(dev))
+    line = re.search(prop_name + r'.*:\s+(\S.+)',
+                     stdout)
+    if not line:
+        print('Previous calibration unset')
+        return [1, 0, 0,
+                0, 1, 0,
+                0, 0, 1]
+    vals = [float(v) for v in line.group(1).split(', ')]
+    return vals
+
+
+def print_cal(cal):
+    for j in range(3):
+        for i in range(3):
+            print(' %.2f' % cal[3*j + i], end='')
+        print()
+    print()
+
+
+def ask(q):
+    do = input(q + ' [y]: ')
+    return (do or 'y').lower() == 'y'
+
+
+def choose_points():
+    default = 4
+    p_min = 3
+    p_max = 9
+
+    while True:
+        p_str = input('Point count (%d-%d) [%d]: ' %
+                      (p_min, p_max, default))
+        if not p_str:
+            return default
+        try:
+            p = int(p_str)
+        except ValueError:
+            continue
+
+        if p_min <= p <= p_max:
+            return p
+
+
+def show_tk(n_points, old_cal=None, new_cal=None, test=False):
+    from tkinter import Tk, Canvas
+    from math import ceil, sqrt
+
+    root = Tk()
+    root.attributes('-fullscreen', True)
+    X = root.winfo_screenwidth()
+    Y = root.winfo_screenheight()
+    canvas = Canvas(root)
+    canvas.pack(expand=True, fill='both')
+
+    points = []
+    point = {}
+    index = -1
+    n_cols = int(ceil(sqrt(n_points)))
+    n_rows = int(ceil(n_points / n_cols))
+
+    def next_point():
+        nonlocal point, index
+        index += 1
+        if index >= n_points:
+            root.destroy()
+        else:
+            x = 0.1 + 0.8*(index % n_cols)/(n_cols - 1)
+            y = 0.1 + 0.8*(index // n_cols)/(n_rows - 1)
+            point = {'sx': x, 'sy': y}
+
+            draw_target(point['sx'], point['sy'])
+
+    def cross(x, y, colour):
+        canvas.create_line(x-10, y, x+10, y, fill=colour)
+        canvas.create_line(x, y-10, x, y+10, fill=colour)
+
+    def draw_target(px, py):
+        x, y = px*X, py*Y
+        canvas.create_oval(x-10, y-10, x+10, y+10, outline='red', width=3)
+        cross(x, y, 'red')
+
+    def cancel_cal(_):
+        print('Calibration cancelled')
+        root.destroy()
+    root.bind('<Escape>', cancel_cal)
+    canvas.bind('<Escape>', cancel_cal)
+
+    def click(event):
+        x, y = event.x, event.y
+
+        if test:
+            # We had already drawn the target in red in the correct place
+            # We need to draw the old-cal'd and new-cal'd points transforming
+            # manually; the cal has not been used yet.
+        pass
+
+        canvas.create_line(X*point['sx'], Y*point['sy'], x, y, fill='black')
+        cross(x, y, 'black')
+        if not test:
+            point.update({'mx': x/X, 'my': y/Y})
+            points.append(point)
+        next_point()
+    canvas.bind('<Button-1>', click)
+
+    next_point()
+    root.mainloop()
+
+    if not test:
+        return points
+
+
+def calibrate(points):
+    import numpy as np
+    from math import log10
+
+    m_screen = np.matrix([
+        [p['sx'], p['sy'], 1] for p in points
+    ])
+    m_mouse = np.matrix([
+        [p['mx'], p['my'], 1] for p in points
+    ])
+    m_transform, residuals, rank, singular = np.linalg.lstsq(m_mouse, m_screen)
+    quality = -log10(residuals.sum())
+
+    return m_transform.getT(), quality
+
+
+def use_cal(dev, new_cal):
+    cal_array = ', '.join(str(x) for x in new_cal.flatten().tolist()[0])
+    xinput('--set-prop', str(dev), prop_name, cal_array)
+
+
+def main():
+    devs = get_devs()
+    print_devs(devs)
+    preferred = choose_preferred(devs)
+    dev = choose_dev(devs, preferred)
+    print()
+
+    old_cal = read_cal(dev)
+    print('Old calibration:')
+    print_cal(old_cal)
+
+    new_cal = None
+    if ask('Calibrate?'):
+        n_points = choose_points()
+        print()
+
+        points = show_tk(n_points)
+        new_cal, quality = calibrate(points)
+
+        print('New calibration:')
+        print(str(new_cal))
+        print('Quality (should be at least 3): %.1f' % quality)
+
+    if ask('Test?'):
+        n_points = choose_points()
+        show_tk(n_points, old_cal, new_cal, test=True)
+
+    if new_cal is not None and ask('Use calibration?'):
+        use_cal(dev, new_cal)
+
+main()
