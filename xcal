@@ -74,11 +74,10 @@ def ask(q):
 def choose_points():
     default = 4
     p_min = 3
-    p_max = 9
 
     while True:
-        p_str = input('Point count (%d-%d) [%d]: ' %
-                      (p_min, p_max, default))
+        p_str = input('Point count (min %d) [%d]: ' %
+                      (p_min, default))
         if not p_str:
             return default
         try:
@@ -86,7 +85,7 @@ def choose_points():
         except ValueError:
             continue
 
-        if p_min <= p <= p_max:
+        if p >= p_min:
             return p
 
 
