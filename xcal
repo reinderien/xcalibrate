@@ -110,9 +110,11 @@ def show_tk(n_points, old_cal_inv, new_cal=None):
     index = -1
     n_cols = int(ceil(sqrt(n_points)))
     n_rows = int(ceil(n_points / n_cols))
+    sensitive = False
 
     def next_point():
-        nonlocal point, index
+        nonlocal point, index, sensitive
+        sensitive = True
         index += 1
         if index >= n_points:
             root.destroy()
@@ -150,6 +152,11 @@ def show_tk(n_points, old_cal_inv, new_cal=None):
         cross(px, py, colour)
 
     def click(event):
+        nonlocal sensitive
+        if not sensitive:
+            return
+        sensitive = False
+    
         sx, sy = point['sx'], point['sy']
 
         ox, oy = event.x/X, event.y/Y  # old-calibrated
@@ -164,7 +171,8 @@ def show_tk(n_points, old_cal_inv, new_cal=None):
 
         point.update({'mx': ux, 'my': uy})
         points.append(point)
-        next_point()
+
+        canvas.after(500, next_point)
     canvas.bind('<Button-1>', click)
 
     root.mainloop()
