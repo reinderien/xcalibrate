@@ -16,7 +16,7 @@ Differences:
 |----------------|---------------------------------|-------------------------------|
 | Language       |C++                              |Python3                        |
 | LOC            |2,289                            |170                            |
-| Interface      |Command-line args with some UI   |Walkthrough-based with some GUI|
+| Interface      |Command-line args with some GUI  |Walkthrough-based with some GUI|
 | GUI toolkit    |X                                |tk                             |
 | Cal points     |4                                |Selectable                     |
 | Math           |Manual                           |Numpy least-squares            |
@@ -47,3 +47,8 @@ How this?
 =========
 
     ./xcal
+
+To do
+=====
+
+- Support zero-rotation cal

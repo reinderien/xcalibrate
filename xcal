@@ -90,6 +90,12 @@ def choose_points():
             return p
 
 
+def transform(x, y, cal):
+    p = np.matrix([[x], [y], [1]])
+    out = np.matmul(cal, p)
+    return out.item(0), out.item(1)
+
+
 def show_tk(n_points, old_cal_inv, new_cal=None):
     from tkinter import Tk, Canvas
     from math import ceil, sqrt
@@ -102,9 +108,27 @@ def show_tk(n_points, old_cal_inv, new_cal=None):
     def resize(event):
         nonlocal X, Y
         X, Y = event.width, event.height
+        draw_legends()
         next_point()
     canvas.bind('<Configure>', resize)
     canvas.pack(expand=True, fill='both')
+
+    legend_y = None
+
+    def legend(text, colour='#000'):
+        nonlocal legend_y
+        canvas.create_text(X/2, legend_y, text=text, fill=colour)
+        legend_y += 12
+
+    def draw_legends():
+        nonlocal legend_y
+        legend_y = Y * 0.3
+        legend('Esc to cancel.')
+        legend('Raw point in black')
+        legend('Old cal point in blue', '#00F')
+        legend('Target point in red', '#F00')
+        if new_cal is not None:
+            legend('New cal point in green', '#0F0')
 
     point, points = {}, []
     index = -1
@@ -114,11 +138,12 @@ def show_tk(n_points, old_cal_inv, new_cal=None):
 
     def next_point():
         nonlocal point, index, sensitive
-        sensitive = True
         index += 1
         if index >= n_points:
-            root.destroy()
+            sensitive = False
+            root.after(1000, root.destroy)
         else:
+            sensitive = True
             x = 0.1 + 0.8*(index % n_cols)/(n_cols - 1)
             y = 0.1 + 0.8*(index // n_cols)/(n_rows - 1)
             point = {'sx': x, 'sy': y}
@@ -141,11 +166,6 @@ def show_tk(n_points, old_cal_inv, new_cal=None):
         root.destroy()
     root.bind('<Escape>', cancel_cal)
     canvas.bind('<Escape>', cancel_cal)
-
-    def transform(x, y, cal):
-        p = np.matrix([[x], [y], [1]])
-        out = np.matmul(cal, p)
-        return out.item(0), out.item(1)
 
     def indicator(sx, sy, px, py, colour):
         canvas.create_line(X*sx, Y*sy, X*px, Y*py, fill=colour)
