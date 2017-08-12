@@ -200,16 +200,47 @@ def show_tk(n_points, old_cal_inv, new_cal=None):
     return points
 
 
-def calibrate(points):
+def fit(screen_pts, mouse_pts):
     from math import log10
-
-    m_screen = np.matrix([[p['sx'], p['sy'], 1] for p in points])
-    m_mouse = np.matrix([[p['mx'], p['my'], 1] for p in points])
+    m_screen = np.matrix([[*p, 1] for p in screen_pts])
+    m_mouse = np.matrix([[*p, 1] for p in mouse_pts])
     m_transform, residuals, rank, singular = np.linalg.lstsq(m_mouse, m_screen)
     quality = -log10(residuals.sum())
+    return m_transform, quality
+
+
+def calibrate(points, disable_rot):
+    if disable_rot:
+        '''
+        [mx 1] [a 0]   [sx 1]
+        [mx 1] [e 1] = [sx 1]
+        [... ]         [... ]
+        
+        [my 1] [d 0]   [sy 1]
+        [my 1] [f 1] = [sy 1]
+        [... ]         [... ]
+        '''
+        tx, qual_x = fit(screen_pts=((p['sx'],) for p in points),
+                         mouse_pts=((p['mx'],) for p in points))
+        ty, qual_y = fit(screen_pts=((p['sy'],) for p in points),
+                         mouse_pts=((p['my'],) for p in points))
+        m_transform = np.matrix([
+            [tx[0, 0], 0,        0],
+            [0,        ty[0, 0], 0],
+            [tx[1, 0], ty[1, 0], 1]])
+        quality = min(qual_x, qual_y)
+    else:
+        '''
+        m_mouse * m_transform = m_screen
+        [mx my 1] [a b 0]   [sx sy 1]
+        [mx my 1] [c d 0] = [sx sy 1]
+        [...    ] [e f 1]   [...    ]
+        '''
+        m_transform, quality = fit(screen_pts=[(p['sx'], p['sy']) for p in points],
+                                   mouse_pts=[(p['mx'], p['my']) for p in points])
+        m_transform[:, 2] = (0, 0, 1)
 
     m_transform = m_transform.getT()
-    m_transform[2, :] = [0, 0, 1]
     return m_transform, quality
 
 
@@ -230,11 +261,12 @@ def main():
     new_cal = None
     if ask('Calibrate?'):
         n_points = choose_points()
+        disable_rot = ask('Disable rotation?')
         print()
 
         points = show_tk(n_points, old_cal_inv)
         if points:
-            new_cal, quality = calibrate(points)
+            new_cal, quality = calibrate(points, disable_rot)
 
             print('New calibration:')
             print(new_cal)

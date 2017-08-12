@@ -15,7 +15,7 @@ Differences:
 |Thing           |xinput_calibrator                |xcal                           |
 |----------------|---------------------------------|-------------------------------|
 | Language       |C++                              |Python3                        |
-| LOC            |2,289                            |170                            |
+| LOC            |2,289                            |284                            |
 | Interface      |Command-line args with some GUI  |Walkthrough-based with some GUI|
 | GUI toolkit    |X                                |tk                             |
 | Cal points     |4                                |Selectable                     |
