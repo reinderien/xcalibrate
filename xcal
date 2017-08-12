@@ -238,7 +238,7 @@ def calibrate(points, disable_rot):
         '''
         m_transform, quality = fit(screen_pts=[(p['sx'], p['sy']) for p in points],
                                    mouse_pts=[(p['mx'], p['my']) for p in points])
-        m_transform[:, 2] = (0, 0, 1)
+        m_transform[:, 2] = ([0], [0], [1])
 
     m_transform = m_transform.getT()
     return m_transform, quality
