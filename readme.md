@@ -1,6 +1,8 @@
 What this?
 ==========
 
+[![Join the chat at https://gitter.im/reinderien_xcal/Lobby](https://badges.gitter.im/reinderien_xcal/Lobby.svg)](https://gitter.im/reinderien_xcal/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+
 This is an alternative to _xinput_calibrator_ (as seen on
 [github](https://github.com/tias/xinput_calibrator),
 [FreeDesktop](https://www.freedesktop.org/wiki/Software/xinput_calibrator/),
