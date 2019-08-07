@@ -17,9 +17,8 @@ def xinput(*args):
 
 
 def get_devs():
-    devs = {int(groups[1]): groups[0] for groups in
-            re.findall(r'↳ (\w.+\w)\s+id=(\d+)\D+slave *pointer',
-                       xinput('--list', '--short'))}
+    groups = re.findall(r'.(\w.+(\w|\(\d+\)))\s+id=(\d+)\D+slave *pointer', xinput('--list', '--short'))
+    devs = {int(group[2]): group[0] for group in groups}
     if not devs:
         print('No suitable input devices found')
         exit(1)
