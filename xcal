@@ -247,6 +247,20 @@ def use_cal(dev, new_cal):
     cal_array = [str(x)+',' for x in new_cal.flatten().tolist()[0]]
     xinput('--set-prop', str(dev), prop_name, *cal_array)
 
+def print_xorg_config(dev_name, new_cal):
+    print("Create a file (for example 99-libinput-ts-calib.conf) in /usr/share/X11/xorg.conf.d/ and put in the following")
+    print()
+    xorg_config = (
+    'Section "InputClass"\n'
+    '    Identifier      "calibration"\n'
+    '    MatchProduct    "{}"\n'
+    '    Option          "CalibrationMatrix"  "{}"\n'
+    'EndSection\n'
+    ).format(
+        str(dev_name),
+        " ".join(map(str, new_cal.flatten().tolist()[0]))
+    )
+    print(xorg_config)
 
 def main():
     devs = get_devs()
@@ -278,5 +292,6 @@ def main():
 
     if new_cal is not None and ask('Use calibration?'):
         use_cal(dev, new_cal)
+        print_xorg_config(devs[dev], new_cal)	
 
 main()
