@@ -4,7 +4,7 @@ What this?
 This is an alternative to _xinput_calibrator_ (as seen on
 [github](https://github.com/tias/xinput_calibrator),
 [FreeDesktop](https://www.freedesktop.org/wiki/Software/xinput_calibrator/),
-[Ubuntu](https://packages.ubuntu.com/zesty/xinput-calibrator), etc.).
+[Ubuntu](https://packages.ubuntu.com/disco/xinput-calibrator), etc.).
 
 Similarities:
 - For Unix-like OS
