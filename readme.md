@@ -12,7 +12,7 @@ Similarities:
 
 Differences:
 
-|Thing           |xinput_calibrator                |xcal                           |
+|Thing           |xinput_calibrator                |xcalibrate                     |
 |----------------|---------------------------------|-------------------------------|
 | Language       |C++                              |Python3                        |
 | LOC            |2,289                            |284                            |
@@ -28,7 +28,7 @@ Differences:
 
 _xinput_calibrator_ features precalibration, timeouts, misclick detection, fake driver testing, and
 a resizable window.
-_xcal_ features none of those things, but offers some other features not present in
+_xcalibrate_ features none of those things, but offers some other features not present in
 _xinput_calibrator_, including pre-save cal test, cal quality indicator, arbitrary cal point count,
 and a slightly more informative GUI. Also, the source is quite simpler.
 
@@ -46,7 +46,7 @@ element-by-element calculations and a fixed calibration dataset size.
 How this?
 =========
 
-    ./xcal
+    ./xcalibrate
 
 To do
 =====
