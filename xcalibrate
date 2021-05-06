@@ -2,9 +2,48 @@
 
 # requires python3-tk, python3-numpy
 
+import sys
 import re
 import numpy as np
 from subprocess import run, PIPE
+
+class commandLineArgs:
+    def __init__(self, devs):
+        self.possibleFlags = [
+                "--use-defaults",
+                "--list",
+                "--calibrate",
+                "--points",
+                "--device",
+                "--skip-test",
+                "--no-rotation",
+                "--save-file"
+                ]
+        self.useDefaults = "--use-defaults" in sys.argv
+        self.listDevicesAndExit = "--list" in sys.argv
+        self.calibrate = "--calibrate" in sys.argv
+        if "--points" in sys.argv:
+            try:
+                self.points = int(sys.argv[sys.argv.index("--points")+1])
+            except:
+                self.printHelpAndExit()
+            if self.points < 3:
+                self.printHelpAndExit()
+        if "--device" in sys.argv:
+            try:
+                self.deviceID = int(sys.argv[sys.argv.index("--device")+1])
+            except:
+                self.printHelpAndExit()
+            if not validate_dev(devs, self.deviceID):
+                self.printHelpAndExit()
+        self.skipTest = "--skip-test" in sys.argv
+        self.disableRotation = "--no-rotation" in sys.argv
+        if "--save-file" in sys.argv:
+            try:
+                self.saveFile = sys.argv[sys.argv.index("--save-file")+1]
+            except:
+                self.printHelpAndExit()
+
 
 
 prop_name = 'libinput Calibration Matrix'
