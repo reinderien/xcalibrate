@@ -102,7 +102,7 @@ def show_tk(n_points, old_cal_inv, new_cal=None):
     root = Tk()
     X, Y = None, None
     w,h = root.winfo_screenwidth(), root.winfo_screenheight()
-    window.geometry("%dx%d" % (w,h))
+    root.geometry("%dx%d" % (w,h))
     canvas = Canvas(root)
 
     def resize(event):
