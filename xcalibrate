@@ -3,51 +3,27 @@
 # requires python3-tk, python3-numpy
 
 import sys
+import argparse
 import re
 import numpy as np
 from subprocess import run, PIPE
 
-class commandLineArgs:
-    def __init__(self, devs):
-        self.possibleFlags = [
-                "--use-defaults",
-                "--list",
-                "--calibrate",
-                "--points",
-                "--device",
-                "--skip-test",
-                "--no-rotation",
-                "--save-file"
-                ]
-        self.useDefaults = "--use-defaults" in sys.argv
-        self.listDevicesAndExit = "--list" in sys.argv
-        self.calibrate = "--calibrate" in sys.argv
-        if "--points" in sys.argv:
-            try:
-                self.points = int(sys.argv[sys.argv.index("--points")+1])
-            except:
-                self.printHelpAndExit()
-            if self.points < 3:
-                self.printHelpAndExit()
-        if "--device" in sys.argv:
-            try:
-                self.deviceID = int(sys.argv[sys.argv.index("--device")+1])
-            except:
-                self.printHelpAndExit()
-            if not validate_dev(devs, self.deviceID):
-                self.printHelpAndExit()
-        self.skipTest = "--skip-test" in sys.argv
-        self.disableRotation = "--no-rotation" in sys.argv
-        if "--save-file" in sys.argv:
-            try:
-                self.saveFile = sys.argv[sys.argv.index("--save-file")+1]
-            except:
-                self.printHelpAndExit()
-
+parser = argparse.ArgumentParser(description="Xcalibrate")
+parser.add_argument("-n","--no-walkthrough",action="store_true", help="Disables the walkthrough. Chooses appropriate defaults where none are supplied")
+parser.add_argument("-l","--list",action="store_true", help="Lists available calibratable devices, then exits")
+parser.add_argument("-c","--calibrate",action="store_true", help="Calibrates the device")
+parser.add_argument("-s","--skip-test",action="store_true", help="Skips the test")
+parser.add_argument("-t","--test",action="store_true", help="Runs the test without prompting the user")
+parser.add_argument("-r","--rotation",action="store_true", help="Allows the transformation matrix to include rotations")
+parser.add_argument("-M", "--maximize",action="store_true", help="If the calibration screen isn't full screen, this flag may fix it")
+parser.add_argument("-u", "--update",action="store_true", help="Applies the transformation matrix to the chosen device. (Only works with --calibrate, or with the walkthrough)")
+parser.add_argument("-p","--points",action="store",type=int, help="Specifies the number of points to use when calibrating the device (minimum of 3, default of 4)")
+parser.add_argument("-T","--test-points",action="store",type=int, help="Specifies the number of points to use when testing the device (minimum of 3, default of 4)")
+parser.add_argument("-d","--device",action="store",type=int, help="Specifies the device to calibrate as an integer (see --list)")
+parser.add_argument("-S","--save-file",action="store",type=str, help="Saves the transformation matrix to the given configuration file")
 
 
 prop_name = 'libinput Calibration Matrix'
-
 
 def xinput(*args):
     return run(args=('/usr/bin/xinput', *args),
@@ -71,13 +47,14 @@ def print_devs(devs):
         print('%4d %35s' % (i, name))
     print()
 
-
 def choose_preferred(devs):
     preferred = [i for (i, n) in devs.items() if 'touch' in n.lower()]
     if preferred:
         return preferred[0]
     return next(iter(devs.keys()))
 
+def validate_dev(devs, dev):
+    return dev in devs.keys()
 
 def choose_dev(devs, preferred):
     while True:
@@ -88,7 +65,7 @@ def choose_dev(devs, preferred):
             dev = int(devstr)
         except ValueError:
             continue
-        if dev in devs.keys():
+        if validate_dev:
             return dev
 
 
@@ -302,20 +279,59 @@ def print_xorg_config(dev_name, new_cal):
     )
     print(xorg_config)
 
+
 def main():
+    args = parser.parse_args()
+    if args.skip_test and args.test:
+        print("can't skip and not skip test.")
+        parser.print_help()
+        exit(0)
+    if args.points is not None and args.points < 3:
+        print("invalid number of configuration points. Must have at least 3 points.")
+        parser.print_help()
+        exit(0)
+    if args.test_points is not None and args.test_points < 3:
+        print("invalid number of testing points. Must have at least 3 points.")
+        parser.print_help()
+        exit(0)
+
     devs = get_devs()
-    print_devs(devs)
+    if args.device is not None and not validate_devs(devs,args.device):
+        print("not a valid device. use --list to see devices.")
+        parser.print_help()
+        exit(0)
+    if args.list:
+        print_devs(devs)
+        exit(0)
+    if not args.no_walkthrough and args.device is None:
+        print_devs(devs)
+
     preferred = choose_preferred(devs)
-    dev = choose_dev(devs, preferred)
-    print()
+
+    dev = None
+    if args.no_walkthrough:
+        dev = args.device
+    else:
+        dev = choose_dev(devs, preferred)
+        print()
 
     old_cal, old_cal_inv = read_cal(dev)
 
     new_cal = None
-    if ask('Calibrate?'):
-        n_points = choose_points()
-        disable_rot = ask('Disable rotation?')
-        print()
+    calibrate = args.calibrate
+    if not args.no_walkthrough and not calibrate:
+        calibrate = ask('Calibrate?')
+
+    if calibrate:
+        n_points = args.points
+        if not args.no_walkthrough and args.points is not None:
+            n_points = choose_points()
+        elif args.points is None:
+            n_points = 4
+        disable_rot = args.disableRotation
+        if not args.no_walkthrough and not disable_rot:
+            disable_rot = ask('Disable rotation?')
+            print()
 
         points = show_tk(n_points, old_cal_inv)
         if points:
@@ -326,11 +342,21 @@ def main():
             print('Quality (should be at least 3): %.1f' % quality)
             print()
 
-    if ask('Test?'):
-        n_points = choose_points()
+    test = args.test
+    if not args.no_walkthrough and not args.skip_test and not args.test:
+        test = ask('Test?')
+    if test:
+        n_points = args.test_points
+        if not args.no_walkthrough and args.test_points is not None:
+            n_points = choose_points()
+        elif args.test_points is None:
+            n_points = 4
         show_tk(n_points, old_cal_inv, new_cal)
 
-    if new_cal is not None and ask('Use calibration?'):
+    useCalibration = args.update and new_cal is not None
+    if not args.no_walkthrough and not args.update and new_cal is not None:
+        useCalibration = ask('Use calibration?')
+    if useCalibration:
         use_cal(dev, new_cal)
         print_xorg_config(devs[dev], new_cal)	
 
