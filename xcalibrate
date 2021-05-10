@@ -24,6 +24,13 @@ parser.add_argument("-S","--save-file",action="store",type=str, help="Saves the 
 
 
 prop_name = 'libinput Calibration Matrix'
+configFormat = (
+    'Section "InputClass"\n'
+    '    Identifier      "calibration"\n'
+    '    MatchProduct    "{}"\n'
+    '    Option          "CalibrationMatrix"  "{}"\n'
+    'EndSection\n'
+)
 
 def xinput(*args):
     return run(args=('/usr/bin/xinput', *args),
@@ -267,13 +274,7 @@ def use_cal(dev, new_cal):
 def print_xorg_config(dev_name, new_cal):
     print("Create a file (for example 99-libinput-ts-calib.conf) in /usr/share/X11/xorg.conf.d/ and put in the following")
     print()
-    xorg_config = (
-    'Section "InputClass"\n'
-    '    Identifier      "calibration"\n'
-    '    MatchProduct    "{}"\n'
-    '    Option          "CalibrationMatrix"  "{}"\n'
-    'EndSection\n'
-    ).format(
+    xorg_config = configFormat.format(
         str(dev_name),
         " ".join(map(str, new_cal.flatten().tolist()[0]))
     )
@@ -296,7 +297,7 @@ def main():
         exit(0)
 
     devs = get_devs()
-    if args.device is not None and not validate_devs(devs,args.device):
+    if args.device is not None and not validate_dev(devs,args.device):
         print("not a valid device. use --list to see devices.")
         parser.print_help()
         exit(0)
@@ -309,7 +310,9 @@ def main():
     preferred = choose_preferred(devs)
 
     dev = None
-    if args.no_walkthrough:
+    if args.no_walkthrough and args.device is None:
+        dev = preferred
+    elif args.device is not None:
         dev = args.device
     else:
         dev = choose_dev(devs, preferred)
@@ -318,18 +321,18 @@ def main():
     old_cal, old_cal_inv = read_cal(dev)
 
     new_cal = None
-    calibrate = args.calibrate
-    if not args.no_walkthrough and not calibrate:
-        calibrate = ask('Calibrate?')
+    shouldCalibrate = args.calibrate
+    if not args.no_walkthrough and not shouldCalibrate:
+        shouldCalibrate = ask('Calibrate?')
 
-    if calibrate:
+    if shouldCalibrate:
         n_points = args.points
         if not args.no_walkthrough and args.points is not None:
             n_points = choose_points()
         elif args.points is None:
             n_points = 4
-        disable_rot = args.disableRotation
-        if not args.no_walkthrough and not disable_rot:
+        disable_rot = not args.rotation
+        if not args.no_walkthrough and disable_rot:
             disable_rot = ask('Disable rotation?')
             print()
 
@@ -359,5 +362,13 @@ def main():
     if useCalibration:
         use_cal(dev, new_cal)
         print_xorg_config(devs[dev], new_cal)	
+    if args.save_file is not None:
+        f = open(args.save_file, "w")
+        xorg_config = configFormat.format(
+            str(devs[dev]),
+            " ".join(map(str, new_cal.flatten().tolist()[0]))
+        )
+        f.write(xorg_config)
+        f.close()
 
 main()
