@@ -124,6 +124,9 @@ def show_tk(n_points, old_cal_inv, new_cal=None):
 
     root = Tk()
     X, Y = None, None
+    root.attributes('-fullscreen', True)
+    # as the above line doesn't work on all screens
+    # we force the geometry to be the fullsize with next two lines
     w,h = root.winfo_screenwidth(), root.winfo_screenheight()
     root.geometry("%dx%d" % (w,h))
     canvas = Canvas(root)
