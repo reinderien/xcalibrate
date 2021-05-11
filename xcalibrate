@@ -45,7 +45,7 @@ def get_devs():
     if not devs:
         print('No suitable input devices found')
         exit(1)
-    return filter(lambda e: validate_dev(devs, e), devs)
+    return list(filter(lambda e: validate_dev(devs, e), devs))
 
 
 def print_devs(devs):
