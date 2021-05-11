@@ -3,6 +3,7 @@
 # requires python3-tk, python3-numpy
 
 import sys
+import os, os.path
 import argparse
 import re
 import numpy as np
@@ -21,7 +22,7 @@ parser.add_argument("-p","--points",action="store",type=int, help="Specifies the
 parser.add_argument("-T","--test-points",action="store",type=int, help="Specifies the number of points to use when testing the device (minimum of 3, default of 4)")
 parser.add_argument("-d","--device",action="store",type=int, help="Specifies the device to calibrate as an integer (see --list)")
 parser.add_argument("-S","--save-file",action="store",type=str, help="Saves the transformation matrix to the given configuration file")
-
+args = parser.parse_args()
 
 prop_name = 'libinput Calibration Matrix'
 configFormat = (
@@ -286,7 +287,6 @@ def print_xorg_config(dev_name, new_cal):
 
 
 def main():
-    args = parser.parse_args()
     if args.skip_test and args.test:
         print("can't skip and not skip test.")
         parser.print_help()
@@ -367,12 +367,16 @@ def main():
         use_cal(dev, new_cal)
         print_xorg_config(devs[dev], new_cal)	
     if args.save_file is not None:
-        f = open(args.save_file, "w")
-        xorg_config = configFormat.format(
-            str(devs[dev]),
-            " ".join(map(str, new_cal.flatten().tolist()[0]))
-        )
-        f.write(xorg_config)
-        f.close()
+        i = args.save_file.rindex("/")
+        folder = args.save_file[:i]
+        fileName = args.save_file[i+1:]
+        if not os.path.exists(folder):
+            os.mkdir(folder)
+        with open(args.save_file, "w+") as f:
+            xorg_config = configFormat.format(
+                str(devs[dev]),
+                " ".join(map(str, new_cal.flatten().tolist()[0]))
+            )
+            f.write(xorg_config)
 
 main()
