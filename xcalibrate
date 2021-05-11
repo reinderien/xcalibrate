@@ -45,7 +45,7 @@ def get_devs():
     if not devs:
         print('No suitable input devices found')
         exit(1)
-    return devs
+    return filter(lambda e: validate_dev(devs, e), devs)
 
 
 def print_devs(devs):
@@ -62,7 +62,13 @@ def choose_preferred(devs):
     return next(iter(devs.keys()))
 
 def validate_dev(devs, dev):
-    return dev in devs.keys()
+    if not dev in devs.keys():
+        return False
+    stdout = xinput('--list-props', str(dev))
+    line = re.search(prop_name + r'.*:\s+(\S.+)', stdout)
+    if not line:
+        return False
+    return True
 
 def choose_dev(devs, preferred):
     while True:
@@ -73,7 +79,7 @@ def choose_dev(devs, preferred):
             dev = int(devstr)
         except ValueError:
             continue
-        if validate_dev:
+        if validate_dev(devs, dev):
             return dev
 
 
