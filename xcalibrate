@@ -52,6 +52,16 @@ def choose_dev(devs, preferred):
         if dev in devs.keys():
             return dev
 
+def choose_int(description, default):
+    while True:
+        p_str = input(description +' [%d]: ' % (default))
+        if not p_str:
+            return default
+        try:
+            p = int(p_str)
+        except ValueError:
+            continue
+        return p
 
 def read_cal(dev):
     stdout = xinput('--list-props', str(dev))
@@ -104,8 +114,12 @@ def show_tk(n_points, old_cal_inv, new_cal=None):
     root.attributes('-fullscreen', True)
     # as the above line doesn't work on all screens
     # we force the geometry to be the fullsize with next two lines
-    w,h = root.winfo_screenwidth(), root.winfo_screenheight()
-    root.geometry("%dx%d" % (w,h))
+    w = choose_int('Screen width', root.winfo_screenwidth())
+    h = choose_int('Screen height', root.winfo_screenheight())
+    xoff = choose_int('Screen X-offset', 0)
+    yoff = choose_int('Screen Y-offset', 0)
+    root.geometry("%dx%d+%d+%d" % (w, h, xoff, yoff))
+    print("Geometry: %dx%d+%d+%d" % (w, h, xoff, yoff))
     canvas = Canvas(root)
 
     def resize(event):
