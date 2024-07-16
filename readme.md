@@ -35,7 +35,8 @@ and a slightly more informative GUI. Also, the source is quite simpler.
 Why this?
 =========
 
-After I couldn't figure out why _xinput_calibrator_ wasn't doing anything on my system (an old CF-29),
+After I couldn't figure out why _xinput_calibrator_ wasn't doing anything on my system (an old
+[CF-29](https://na.panasonic.com/us/computers-tablets/computers/laptops/toughbook-cf-29)),
 I read and followed
 [this excellent walkthrough](https://wiki.archlinux.org/index.php/Talk:Calibrating_Touchscreen#Libinput_breaks_xinput_calibrator)
 on the Arch wiki. It was too hacky for my comfort, so I wrote this tool inspired by Zootboy's
@@ -51,9 +52,13 @@ How this?
 To do
 =====
 
-- ?
+- Review some of the forks and issues logged
+- Be more interactive in device selection
+- Python 3 scrub
 
 Discuss
 =======
 
-[![Join the chat at https://gitter.im/reinderien_xcal/Lobby](https://badges.gitter.im/reinderien_xcal/Lobby.svg)](https://gitter.im/reinderien_xcal/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+Check out the [Discussions](https://github.com/reinderien/xcalibrate/discussions) page.
+Github Discussions has superceded the
+[Gitter instance](https://gitter.im/reinderien_xcal/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge).
