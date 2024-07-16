@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-# requires python3-tk, python3-numpy
-
 import re
 import numpy as np
 from subprocess import run, PIPE

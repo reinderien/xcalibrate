@@ -1,0 +1,7 @@
+# To get these requirements,
+#    python3 -m pip install -r requirements.txt
+numpy
+
+# tkinter is part of the interpreter and not available thhrough pip. Instead, install
+# this package if you're on an Ubuntu-like:
+#    sudo apt install python3-tk
