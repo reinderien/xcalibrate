@@ -9,9 +9,11 @@ prop_name = 'libinput Calibration Matrix'
 
 
 def xinput(*args):
-    return run(args=('/usr/bin/xinput', *args),
-               stdout=PIPE, check=True,
-               universal_newlines=True).stdout
+    return run(
+        args=('/usr/bin/xinput', *args),
+        stdout=PIPE, check=True,
+        universal_newlines=True,
+    ).stdout
 
 
 def get_devs():
@@ -23,7 +25,7 @@ def get_devs():
     return devs
 
 
-def print_devs(devs):
+def print_devs(devs) -> None:
     print('Pointer devices:')
     print('%4s %35s' % ('ID', 'Name'))
     for i, name in sorted(devs.items()):
@@ -51,7 +53,7 @@ def choose_dev(devs, preferred):
             return dev
 
 
-def read_cal(dev):
+def read_cal(dev) -> tuple:
     stdout = xinput('--list-props', str(dev))
     line = re.search(prop_name + r'.*:\s+(\S.+)', stdout)
     if not line:
@@ -65,7 +67,7 @@ def read_cal(dev):
     return vals, np.linalg.inv(vals)
 
 
-def ask(q):
+def ask(q: str) -> bool:
     do = input(q + ' [y]: ')
     return (do or 'y').lower() == 'y'
 
@@ -87,7 +89,7 @@ def choose_points():
             return p
 
 
-def transform(x, y, cal):
+def transform(x, y, cal) -> tuple:
     p = np.matrix([[x], [y], [1]])
     out = np.matmul(cal, p)
     return out.item(0), out.item(1)
@@ -106,7 +108,7 @@ def show_tk(n_points, old_cal_inv, new_cal=None):
     root.geometry("%dx%d" % (w,h))
     canvas = Canvas(root)
 
-    def resize(event):
+    def resize(event) -> None:
         nonlocal X, Y
         X, Y = event.width, event.height
         draw_legends()
@@ -116,12 +118,12 @@ def show_tk(n_points, old_cal_inv, new_cal=None):
 
     legend_y = None
 
-    def legend(text, colour='#000'):
+    def legend(text, colour='#000') -> None:
         nonlocal legend_y
         canvas.create_text(X/2, legend_y, text=text, fill=colour)
         legend_y += 12
 
-    def draw_legends():
+    def draw_legends() -> None:
         nonlocal legend_y
         legend_y = Y * 0.3
         legend('Esc to cancel.')
@@ -137,7 +139,7 @@ def show_tk(n_points, old_cal_inv, new_cal=None):
     n_rows = int(ceil(n_points / n_cols))
     sensitive = False
 
-    def next_point():
+    def next_point() -> None:
         nonlocal point, index, sensitive
         index += 1
         if index >= n_points:
@@ -151,17 +153,17 @@ def show_tk(n_points, old_cal_inv, new_cal=None):
 
             draw_target(point['sx'], point['sy'])
 
-    def cross(px, py, colour):
+    def cross(px, py, colour) -> None:
         x, y = px*X, py*Y
         canvas.create_line(x-10, y, x+10, y, fill=colour)
         canvas.create_line(x, y-10, x, y+10, fill=colour)
 
-    def draw_target(px, py):
+    def draw_target(px, py) -> None:
         x, y = px*X, py*Y
         canvas.create_oval(x-10, y-10, x+10, y+10, outline='#F00', width=3)
         cross(px, py, '#F00')
 
-    def cancel_cal(_):
+    def cancel_cal(_) -> None:
         print('Calibration cancelled')
         points.clear()
         root.destroy()
@@ -201,7 +203,7 @@ def show_tk(n_points, old_cal_inv, new_cal=None):
     return points
 
 
-def fit(screen_pts, mouse_pts):
+def fit(screen_pts, mouse_pts) -> tuple:
     from math import log10
     m_screen = np.matrix([[*p, 1] for p in screen_pts])
     m_mouse = np.matrix([[*p, 1] for p in mouse_pts])
@@ -210,7 +212,7 @@ def fit(screen_pts, mouse_pts):
     return m_transform, quality
 
 
-def calibrate(points, disable_rot):
+def calibrate(points, disable_rot) -> tuple:
     if disable_rot:
         '''
         [mx 1] [a 0]   [sx 1]
@@ -245,11 +247,12 @@ def calibrate(points, disable_rot):
     return m_transform, quality
 
 
-def use_cal(dev, new_cal):
+def use_cal(dev, new_cal) -> None:
     cal_array = [str(x)+',' for x in new_cal.flatten().tolist()[0]]
     xinput('--set-prop', str(dev), prop_name, *cal_array)
 
-def print_xorg_config(dev_name, new_cal):
+
+def print_xorg_config(dev_name, new_cal) -> None:
     print("Create a file (for example 99-libinput-ts-calib.conf) in /usr/share/X11/xorg.conf.d/ and put in the following")
     print()
     xorg_config = (
@@ -264,7 +267,8 @@ def print_xorg_config(dev_name, new_cal):
     )
     print(xorg_config)
 
-def main():
+
+def main() -> None:
     devs = get_devs()
     print_devs(devs)
     preferred = choose_preferred(devs)
@@ -296,4 +300,6 @@ def main():
         use_cal(dev, new_cal)
         print_xorg_config(devs[dev], new_cal)	
 
-main()
+
+if __name__ == '__main__':
+    main()
