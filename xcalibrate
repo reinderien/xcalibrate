@@ -41,13 +41,13 @@ def get_devs() -> dict[int, str]:
 
 def print_devs(devs: dict[int, str]) -> None:
     print('Pointer devices:')
-    print('%4s %35s' % ('ID', 'Name'))
+    print(f'{"ID":4s} {"Name":35s}')
     for i, name in sorted(devs.items()):
-        print('%4d %35s' % (i, name))
+        print(f'{i:4d} {name:35s}')
     print()
 
 
-def choose_preferred(devs: dict[int, str]):
+def choose_preferred(devs: dict[int, str]) -> int:
     preferred = next(
         (i for (i, n) in devs.items() if 'touch' in n.lower()),
         None
@@ -59,8 +59,8 @@ def choose_preferred(devs: dict[int, str]):
 
 def choose_dev(devs: dict[int, str], preferred: int) -> int:
     while True:
-        devstr = input('Device to calibrate [%d]: ' % preferred)
-        if not devstr:
+        devstr = input(f'Device to calibrate [{preferred}]: ')
+        if devstr == '':
             return preferred
         try:
             dev = int(devstr)
@@ -109,13 +109,10 @@ def ask(q: str) -> bool:
     return (do or 'y')[:1].lower() == 'y'
 
 
-def choose_points():
-    p_min, default = 3, 4
-
+def choose_points(p_min: int = 3, default: int = 4) -> int:
     while True:
-        p_str = input('Point count (min %d) [%d]: ' %
-                      (p_min, default))
-        if not p_str:
+        p_str = input(f'Point count (min {p_min}) [{default}]: ')
+        if p_str == '':
             return default
         try:
             p = int(p_str)
@@ -131,9 +128,8 @@ def transform(x: float, y: float, cal: np.ndarray) -> np.ndarray:
     return out[:2]
 
 
-def show_tk(n_points: int, old_cal_inv: np.ndarray, new_cal: np.ndarray | None = None):
+def show_tk(n_points: int, old_cal_inv: np.ndarray, new_cal: np.ndarray | None = None) -> list:
     from tkinter import Tk, Canvas
-    from math import ceil, sqrt
 
     root = Tk()
     X, Y = None, None
@@ -141,7 +137,7 @@ def show_tk(n_points: int, old_cal_inv: np.ndarray, new_cal: np.ndarray | None =
     # as the above line doesn't work on all screens
     # we force the geometry to be the fullsize with next two lines
     w,h = root.winfo_screenwidth(), root.winfo_screenheight()
-    root.geometry("%dx%d" % (w,h))
+    root.geometry(f'{w}x{h}')
     canvas = Canvas(root)
 
     def resize(event) -> None:
@@ -154,7 +150,7 @@ def show_tk(n_points: int, old_cal_inv: np.ndarray, new_cal: np.ndarray | None =
 
     legend_y = None
 
-    def legend(text, colour='#000') -> None:
+    def legend(text: str, colour: str = '#000') -> None:
         nonlocal legend_y
         canvas.create_text(X/2, legend_y, text=text, fill=colour)
         legend_y += 12
@@ -171,8 +167,8 @@ def show_tk(n_points: int, old_cal_inv: np.ndarray, new_cal: np.ndarray | None =
 
     point, points = {}, []
     index = -1
-    n_cols = int(ceil(sqrt(n_points)))
-    n_rows = int(ceil(n_points / n_cols))
+    n_cols = int(np.ceil(np.sqrt(n_points)))
+    n_rows = int(np.ceil(n_points / n_cols))
     sensitive = False
 
     def next_point() -> None:
@@ -183,18 +179,19 @@ def show_tk(n_points: int, old_cal_inv: np.ndarray, new_cal: np.ndarray | None =
             root.after(1000, root.destroy)
         else:
             sensitive = True
-            x = 0.1 + 0.8*(index % n_cols)/(n_cols - 1)
-            y = 0.1 + 0.8*(index // n_cols)/(n_rows - 1)
+            vert, horz = divmod(index, n_cols)
+            x = 0.1 + 0.8*horz/(n_cols - 1)
+            y = 0.1 + 0.8*vert/(n_rows - 1)
             point = {'sx': x, 'sy': y}
 
             draw_target(point['sx'], point['sy'])
 
-    def cross(px, py, colour) -> None:
+    def cross(px: float, py: float, colour: str) -> None:
         x, y = px*X, py*Y
         canvas.create_line(x-10, y, x+10, y, fill=colour)
         canvas.create_line(x, y-10, x, y+10, fill=colour)
 
-    def draw_target(px, py) -> None:
+    def draw_target(px: float, py: float) -> None:
         x, y = px*X, py*Y
         canvas.create_oval(x-10, y-10, x+10, y+10, outline='#F00', width=3)
         cross(px, py, '#F00')
@@ -206,11 +203,11 @@ def show_tk(n_points: int, old_cal_inv: np.ndarray, new_cal: np.ndarray | None =
     root.bind('<Escape>', cancel_cal)
     canvas.bind('<Escape>', cancel_cal)
 
-    def indicator(sx, sy, px, py, colour):
+    def indicator(sx: float, sy: float, px: float, py: float, colour: str) -> None:
         canvas.create_line(X*sx, Y*sy, X*px, Y*py, fill=colour)
         cross(px, py, colour)
 
-    def click(event):
+    def click(event) -> None:
         nonlocal sensitive
         if not sensitive:
             return
@@ -239,7 +236,10 @@ def show_tk(n_points: int, old_cal_inv: np.ndarray, new_cal: np.ndarray | None =
     return points
 
 
-def fit(screen_pts, mouse_pts) -> tuple:
+def fit(screen_pts, mouse_pts) -> tuple[
+    np.ndarray,  # transform matrix
+    float,       # quality metric
+]:
     m_screen = np.array([(*p, 1) for p in screen_pts])
     m_mouse = np.array([(*p, 1) for p in mouse_pts])
     m_transform, residuals, rank, singular = np.linalg.lstsq(m_mouse, m_screen, rcond=None)
@@ -332,7 +332,7 @@ def main() -> None:
 
             print('New calibration:')
             print(new_cal)
-            print('Quality (should be at least 3): %.1f' % quality)
+            print(f'Quality (should be at least 3): {quality:.1f}')
             print()
 
     if ask('Test?'):
