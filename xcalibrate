@@ -2,30 +2,44 @@
 
 import re
 import numpy as np
-from subprocess import run, PIPE
+import subprocess
 
 
-prop_name = 'libinput Calibration Matrix'
+PROP_NAMES = (
+    'libinput Calibration Matrix',
+    'Coordinate Transformation Matrix',
+)
 
 
-def xinput(*args):
-    return run(
+def xinput(*args: str) -> str:
+    return subprocess.check_output(
         args=('/usr/bin/xinput', *args),
-        stdout=PIPE, check=True,
-        universal_newlines=True,
-    ).stdout
+        text=True,
+    )
 
 
-def get_devs():
-    groups = re.findall(r'.(\w.+(\w|\(\d+\)))\s+id=(\d+)\D+slave *pointer', xinput('--list', '--short'))
-    devs = {int(group[2]): group[0] for group in groups}
-    if not devs:
+def get_devs() -> dict[int, str]:
+    stdout = xinput('--list', '--short')
+    matches = re.finditer(r'''(?xim)
+        ^.*?           # line start, any (lazy) prefix
+        (?P<name>      # greedy name, beginning with a letter,
+            [a-z].*\S  # ending with any non-space character
+        )
+        \s*id=         # ID marker
+        (?P<id>        # numeric ID
+            \d+
+        )
+        \s*
+        \[?slave\s*pointer  # must be a pointer device
+    ''', stdout)
+    devs = {int(match['id']): match['name'] for match in matches}
+    if len(devs) < 1:
         print('No suitable input devices found')
         exit(1)
     return devs
 
 
-def print_devs(devs) -> None:
+def print_devs(devs: dict[int, str]) -> None:
     print('Pointer devices:')
     print('%4s %35s' % ('ID', 'Name'))
     for i, name in sorted(devs.items()):
@@ -33,14 +47,17 @@ def print_devs(devs) -> None:
     print()
 
 
-def choose_preferred(devs):
-    preferred = [i for (i, n) in devs.items() if 'touch' in n.lower()]
-    if preferred:
-        return preferred[0]
-    return next(iter(devs.keys()))
+def choose_preferred(devs: dict[int, str]):
+    preferred = next(
+        (i for (i, n) in devs.items() if 'touch' in n.lower()),
+        None
+    )
+    if preferred is None:
+        return next(iter(devs.keys()))
+    return preferred
 
 
-def choose_dev(devs, preferred):
+def choose_dev(devs: dict[int, str], preferred: int) -> int:
     while True:
         devstr = input('Device to calibrate [%d]: ' % preferred)
         if not devstr:
@@ -53,23 +70,43 @@ def choose_dev(devs, preferred):
             return dev
 
 
-def read_cal(dev) -> tuple:
+def read_cal(dev: int) -> tuple[
+    str,         # xinput property name
+    np.ndarray,  # calibration
+    np.ndarray,  # inverse calibration
+]:
+    names = '|'.join(re.escape(name) for name in PROP_NAMES)
+    pattern = r'''(?xim)
+        ^\s*      # line start, greedy spaces
+        (?P<name>
+            %s    # interpolated
+        )
+        \s*       # greedy spaces
+        \(\d+\):  # numeric ID, not captured
+        \s*       # greedy spaces
+        (?P<value>
+            .+?   # lazy value content
+        )
+        $         # line end
+    ''' % names
     stdout = xinput('--list-props', str(dev))
-    line = re.search(prop_name + r'.*:\s+(\S.+)', stdout)
-    if not line:
-        print('Cal property not set; is this an xinput device?')
+    match = re.search(pattern, stdout)
+    if match is None:
+        print('Calibration matrix property not set; is this an xinput device?')
         exit(1)
-    vals = np.matrix(line.group(1)).reshape(3, 3)
 
-    print('Old calibration:')
-    print(vals)
+    name = match['name']
+    cal = np.fromstring(match['value'], sep=',').reshape((3, 3))
+
+    print(f'Old calibration ({name}):')
+    print(cal)
     print()
-    return vals, np.linalg.inv(vals)
+    return name, cal, np.linalg.inv(cal)
 
 
 def ask(q: str) -> bool:
     do = input(q + ' [y]: ')
-    return (do or 'y').lower() == 'y'
+    return (do or 'y')[:1].lower() == 'y'
 
 
 def choose_points():
@@ -89,13 +126,12 @@ def choose_points():
             return p
 
 
-def transform(x, y, cal) -> tuple:
-    p = np.matrix([[x], [y], [1]])
-    out = np.matmul(cal, p)
-    return out.item(0), out.item(1)
+def transform(x: float, y: float, cal: np.ndarray) -> np.ndarray:
+    out = cal @ (x, y, 1)
+    return out[:2]
 
 
-def show_tk(n_points, old_cal_inv, new_cal=None):
+def show_tk(n_points: int, old_cal_inv: np.ndarray, new_cal: np.ndarray | None = None):
     from tkinter import Tk, Canvas
     from math import ceil, sqrt
 
@@ -204,15 +240,17 @@ def show_tk(n_points, old_cal_inv, new_cal=None):
 
 
 def fit(screen_pts, mouse_pts) -> tuple:
-    from math import log10
-    m_screen = np.matrix([[*p, 1] for p in screen_pts])
-    m_mouse = np.matrix([[*p, 1] for p in mouse_pts])
-    m_transform, residuals, rank, singular = np.linalg.lstsq(m_mouse, m_screen)
-    quality = -log10(residuals.sum())
+    m_screen = np.array([(*p, 1) for p in screen_pts])
+    m_mouse = np.array([(*p, 1) for p in mouse_pts])
+    m_transform, residuals, rank, singular = np.linalg.lstsq(m_mouse, m_screen, rcond=None)
+    quality = -np.log10(residuals.sum())
     return m_transform, quality
 
 
-def calibrate(points, disable_rot) -> tuple:
+def calibrate(points, disable_rot: bool) -> tuple[
+    np.ndarray,  # new cal matrix
+    float,       # quality metric
+]:
     if disable_rot:
         '''
         [mx 1] [a 0]   [sx 1]
@@ -227,7 +265,7 @@ def calibrate(points, disable_rot) -> tuple:
                          mouse_pts=((p['mx'],) for p in points))
         ty, qual_y = fit(screen_pts=((p['sy'],) for p in points),
                          mouse_pts=((p['my'],) for p in points))
-        m_transform = np.matrix([
+        m_transform = np.array([
             [tx[0, 0], 0,        0],
             [0,        ty[0, 0], 0],
             [tx[1, 0], ty[1, 0], 1]])
@@ -241,31 +279,36 @@ def calibrate(points, disable_rot) -> tuple:
         '''
         m_transform, quality = fit(screen_pts=[(p['sx'], p['sy']) for p in points],
                                    mouse_pts=[(p['mx'], p['my']) for p in points])
-        m_transform[:, 2] = ([0], [0], [1])
+        m_transform[:, 2] = 0, 0, 1
 
-    m_transform = m_transform.getT()
-    return m_transform, quality
-
-
-def use_cal(dev, new_cal) -> None:
-    cal_array = [str(x)+',' for x in new_cal.flatten().tolist()[0]]
-    xinput('--set-prop', str(dev), prop_name, *cal_array)
+    return m_transform.T, quality
 
 
-def print_xorg_config(dev_name, new_cal) -> None:
-    print("Create a file (for example 99-libinput-ts-calib.conf) in /usr/share/X11/xorg.conf.d/ and put in the following")
-    print()
-    xorg_config = (
-    'Section "InputClass"\n'
-    '    Identifier      "calibration"\n'
-    '    MatchProduct    "{}"\n'
-    '    Option          "CalibrationMatrix"  "{}"\n'
-    'EndSection\n'
-    ).format(
-        str(dev_name),
-        " ".join(map(str, new_cal.flatten().tolist()[0]))
+def use_cal(dev: int, prop_name: str, new_cal: np.ndarray) -> None:
+    cal_strings = (
+        f'{x:.15g},'
+        for row in new_cal for x in row
     )
-    print(xorg_config)
+    xinput('--set-prop', str(dev), prop_name, *cal_strings)
+    print('The new calibration has been activated.')
+
+
+def print_xorg_config(dev_name: str, prop_name: str, new_cal: np.ndarray) -> None:
+    cal_string = ' '.join(
+        f'{x:.15g}'
+        for row in new_cal for x in row
+    )
+    print(
+f'''To persist, create e.g.
+/usr/share/X11/xorg.conf.d/99-libinput-ts-calib.conf
+and add the following:
+
+Section "InputClass"
+    Identifier      "calibration"
+    MatchProduct    "{dev_name}"
+    Option          "{prop_name}"  "{cal_string}"
+EndSection
+''')
 
 
 def main() -> None:
@@ -275,7 +318,7 @@ def main() -> None:
     dev = choose_dev(devs, preferred)
     print()
 
-    old_cal, old_cal_inv = read_cal(dev)
+    prop_name, old_cal, old_cal_inv = read_cal(dev)
 
     new_cal = None
     if ask('Calibrate?'):
@@ -297,8 +340,8 @@ def main() -> None:
         show_tk(n_points, old_cal_inv, new_cal)
 
     if new_cal is not None and ask('Use calibration?'):
-        use_cal(dev, new_cal)
-        print_xorg_config(devs[dev], new_cal)	
+        use_cal(dev, prop_name, new_cal)
+        print_xorg_config(devs[dev], prop_name, new_cal)
 
 
 if __name__ == '__main__':
