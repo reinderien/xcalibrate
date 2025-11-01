@@ -18,9 +18,8 @@ def xinput(*args: str) -> str:
     )
 
 
-def get_devs() -> dict[int, str]:
-    stdout = xinput('--list', '--short')
-    matches = re.finditer(r'''(?xim)
+def get_devs(pointer_only: bool = True) -> dict[int, str]:
+    pattern = r'''(?xim)
         ^.*?           # line start, any (lazy) prefix
         (?P<name>      # greedy name, beginning with a letter,
             [a-z].*\S  # ending with any non-space character
@@ -30,17 +29,14 @@ def get_devs() -> dict[int, str]:
             \d+
         )
         \s*
-        \[?slave\s*pointer  # must be a pointer device
-    ''', stdout)
-    devs = {int(match['id']): match['name'] for match in matches}
-    if len(devs) < 1:
-        print('No suitable input devices found')
-        exit(1)
-    return devs
+        \[?slave\s*%s  # must be a pointer device
+    ''' % ('pointer' if pointer_only else '.+?')
+    stdout = xinput('--list', '--short')
+    matches = re.finditer(pattern, stdout)
+    return {int(match['id']): match['name'] for match in matches}
 
 
 def print_devs(devs: dict[int, str]) -> None:
-    print('Pointer devices:')
     print(f'{"ID":4s} {"Name":35s}')
     for i, name in sorted(devs.items()):
         print(f'{i:4d} {name:35s}')
@@ -92,7 +88,11 @@ def read_cal(dev: int) -> tuple[
     stdout = xinput('--list-props', str(dev))
     match = re.search(pattern, stdout)
     if match is None:
-        print('Calibration matrix property not set; is this an xinput device?')
+        print(f'$ xinput --list-props {dev}')
+        print('does not contain any of these properties:')
+        for name in PROP_NAMES:
+            print('   ', name)
+        print("So I don't know how to calibrate it.")
         exit(1)
 
     name = match['name']
@@ -317,6 +317,12 @@ EndSection
 
 def main() -> None:
     devs = get_devs()
+    if len(devs) < 1:
+        print('Warning: no pointer devices found; showing all:')
+        devs = get_devs(pointer_only=False)
+    else:
+        print('Pointer devices:')
+    
     print_devs(devs)
     preferred = choose_preferred(devs)
     dev = choose_dev(devs, preferred)
