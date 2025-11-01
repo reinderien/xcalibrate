@@ -236,16 +236,15 @@ def show_tk(n_points: int, old_cal_inv: np.ndarray, new_cal: np.ndarray | None =
     return points
 
 
-def fit(screen_pts, mouse_pts) -> tuple[
+def fit(screen_pts, mouse_pts, expected_rank: int = 3) -> tuple[
     np.ndarray,  # transform matrix
     float,       # quality metric
 ]:
     m_screen = np.array([(*p, 1) for p in screen_pts])
     m_mouse = np.array([(*p, 1) for p in mouse_pts])
     m_transform, residuals, rank, singular = np.linalg.lstsq(m_mouse, m_screen, rcond=None)
-    if rank != 3:
-        print(f'Deficient transformation of rank {rank}. Please try calibrating again.')
-        exit(1)
+    if rank != expected_rank:
+        print(f'Warning: Deficient transformation of rank {rank}. Please try calibrating again.')
     quality = -np.log10(residuals.sum())
     return m_transform, quality
 
@@ -265,9 +264,11 @@ def calibrate(points, disable_rot: bool) -> tuple[
         [... ]         [... ]
         '''
         tx, qual_x = fit(screen_pts=((p['sx'],) for p in points),
-                         mouse_pts=((p['mx'],) for p in points))
+                         mouse_pts=((p['mx'],) for p in points),
+                         expected_rank=2)
         ty, qual_y = fit(screen_pts=((p['sy'],) for p in points),
-                         mouse_pts=((p['my'],) for p in points))
+                         mouse_pts=((p['my'],) for p in points),
+                         expected_rank=2)
         m_transform = np.array([
             [tx[0, 0], 0,        0],
             [0,        ty[0, 0], 0],
@@ -281,7 +282,8 @@ def calibrate(points, disable_rot: bool) -> tuple[
         [...    ] [e f 1]   [...    ]
         '''
         m_transform, quality = fit(screen_pts=[(p['sx'], p['sy']) for p in points],
-                                   mouse_pts=[(p['mx'], p['my']) for p in points])
+                                   mouse_pts=[(p['mx'], p['my']) for p in points],
+                                   expected_rank=3)
         m_transform[:, 2] = 0, 0, 1
 
     return m_transform.T, quality
