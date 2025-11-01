@@ -23,7 +23,7 @@ Differences:
 | Outputs        |Xorg.conf, hal, xinput           |xinput                         |
 | Popularity     |High                             |Zero so far                    |
 | Tested         |Pretty well                      |Not very well                  |
-| OS distribution|Available in most major repos    |Zero so far                    |
+| OS distribution|Available in most major repos    |[AUR](https://aur.archlinux.org/packages/xcalibrate-git) |
 | Dependencies   |libstdc++, libx11, libxi         |python3, tkinter, numpy        |
 
 _xinput_calibrator_ features precalibration, timeouts, misclick detection, fake driver testing, and
