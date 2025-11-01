@@ -243,6 +243,9 @@ def fit(screen_pts, mouse_pts) -> tuple[
     m_screen = np.array([(*p, 1) for p in screen_pts])
     m_mouse = np.array([(*p, 1) for p in mouse_pts])
     m_transform, residuals, rank, singular = np.linalg.lstsq(m_mouse, m_screen, rcond=None)
+    if rank != 3:
+        print(f'Deficient transformation of rank {rank}. Please try calibrating again.')
+        exit(1)
     quality = -np.log10(residuals.sum())
     return m_transform, quality
 
