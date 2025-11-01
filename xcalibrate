@@ -66,11 +66,7 @@ def choose_dev(devs: dict[int, str], preferred: int) -> int:
             return dev
 
 
-def read_cal(dev: int) -> tuple[
-    str,         # xinput property name
-    np.ndarray,  # calibration
-    np.ndarray,  # inverse calibration
-]:
+def read_prop(dev: int, names: tuple[str, ...]) -> tuple[str, str | None, str | None]:
     names = '|'.join(re.escape(name) for name in PROP_NAMES)
     pattern = r'''(?xim)
         ^\s*      # line start, greedy spaces
@@ -88,6 +84,17 @@ def read_cal(dev: int) -> tuple[
     stdout = xinput('--list-props', str(dev))
     match = re.search(pattern, stdout)
     if match is None:
+        return stdout, None, None
+    return stdout, match['name'], match['value']
+
+
+def read_cal(dev: int) -> tuple[
+    str,         # xinput property name
+    np.ndarray,  # calibration
+    np.ndarray,  # inverse calibration
+]:
+    stdout, name, value = read_prop(dev, PROP_NAMES)
+    if name is None:
         print(f'$ xinput --list-props {dev}')
         print('does not contain any of these properties:')
         for name in PROP_NAMES:
@@ -95,8 +102,7 @@ def read_cal(dev: int) -> tuple[
         print("So I don't know how to calibrate it.")
         exit(1)
 
-    name = match['name']
-    cal = np.fromstring(match['value'], sep=',').reshape((3, 3))
+    cal = np.fromstring(value, sep=',').reshape((3, 3))
 
     print(f'Old calibration ({name}):')
     print(cal)
