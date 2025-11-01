@@ -129,18 +129,18 @@ def transform(x: float, y: float, cal: np.ndarray) -> np.ndarray:
 
 
 def show_tk(n_points: int, old_cal_inv: np.ndarray, new_cal: np.ndarray | None = None) -> list:
-    from tkinter import Tk, Canvas
+    import tkinter
 
-    root = Tk()
+    root = tkinter.Tk()
     X, Y = None, None
     root.attributes('-fullscreen', True)
     # as the above line doesn't work on all screens
     # we force the geometry to be the fullsize with next two lines
     w,h = root.winfo_screenwidth(), root.winfo_screenheight()
     root.geometry(f'{w}x{h}')
-    canvas = Canvas(root)
+    canvas = tkinter.Canvas(root)
 
-    def resize(event) -> None:
+    def resize(event: tkinter.Event) -> None:
         nonlocal X, Y
         X, Y = event.width, event.height
         draw_legends()
@@ -207,7 +207,7 @@ def show_tk(n_points: int, old_cal_inv: np.ndarray, new_cal: np.ndarray | None =
         canvas.create_line(X*sx, Y*sy, X*px, Y*py, fill=colour)
         cross(px, py, colour)
 
-    def click(event) -> None:
+    def click(event: tkinter.Event) -> None:
         nonlocal sensitive
         if not sensitive:
             return
