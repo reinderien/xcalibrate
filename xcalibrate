@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 import datetime
+import locale
 import re
-import numpy as np
 import subprocess
+import numpy as np
 
 
 PROP_NAMES = (
@@ -331,6 +332,8 @@ EndSection
 
 
 def main() -> None:
+    locale.setlocale(category=locale.LC_ALL, locale='')
+
     devs = get_devs()
     if len(devs) < 1:
         print('Warning: no pointer devices found; showing all:')
