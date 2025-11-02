@@ -129,11 +129,15 @@ def choose_points(p_min: int = 3, default: int = 4) -> int:
 
 
 def transform(x: float, y: float, cal: np.ndarray) -> np.ndarray:
-    out = cal @ (x, y, 1)
-    return out[:2]
+    return cal[:2, :] @ (x, y, 1)
 
 
-def show_tk(n_points: int, old_cal_inv: np.ndarray, new_cal: np.ndarray | None = None) -> list:
+def show_tk(
+    n_points: int, old_cal_inv: np.ndarray, new_cal: np.ndarray | None = None,
+) -> tuple[
+    np.ndarray,  # normalised mouse points
+    np.ndarray,  # normalised screen points
+]:
     import tkinter
 
     root = tkinter.Tk()
@@ -152,7 +156,6 @@ def show_tk(n_points: int, old_cal_inv: np.ndarray, new_cal: np.ndarray | None =
         next_point()
     canvas.bind('<Configure>', resize)
     canvas.pack(expand=True, fill='both')
-
     legend_y = None
 
     def legend(text: str, colour: str = '#000') -> None:
@@ -170,26 +173,28 @@ def show_tk(n_points: int, old_cal_inv: np.ndarray, new_cal: np.ndarray | None =
         if new_cal is not None:
             legend('New cal point in green', '#0F0')
 
-    point, points = {}, []
     index = -1
     n_cols = int(np.ceil(np.sqrt(n_points)))
     n_rows = int(np.ceil(n_points / n_cols))
+    screen_points = 0.1 + 0.8*np.stack(
+        np.divmod(  # returns y, x tuple
+            np.arange(n_points, dtype=np.float64),
+            n_cols,
+        ), axis=1,  # returns (n, 2=yx) array
+    )[:, ::-1]/(    # flip to (n, 2=xy) array
+        n_cols - 1, n_rows - 1,  # normalise
+    )
+    mouse_points = np.empty_like(screen_points)
     sensitive = False
 
     def next_point() -> None:
-        nonlocal point, index, sensitive
+        nonlocal index, sensitive
         index += 1
-        if index >= n_points:
-            sensitive = False
-            root.after(1000, root.destroy)
+        sensitive = index < n_points
+        if sensitive:
+            draw_target(*screen_points[index])
         else:
-            sensitive = True
-            vert, horz = divmod(index, n_cols)
-            x = 0.1 + 0.8*horz/(n_cols - 1)
-            y = 0.1 + 0.8*vert/(n_rows - 1)
-            point = {'sx': x, 'sy': y}
-
-            draw_target(point['sx'], point['sy'])
+            root.after(1000, root.destroy)
 
     def cross(px: float, py: float, colour: str) -> None:
         x, y = px*X, py*Y
@@ -203,7 +208,8 @@ def show_tk(n_points: int, old_cal_inv: np.ndarray, new_cal: np.ndarray | None =
 
     def cancel_cal(_) -> None:
         print('Calibration cancelled')
-        points.clear()
+        nonlocal screen_points, mouse_points
+        screen_points, mouse_points = np.empty((2, 0, 2))
         root.destroy()
 
     root.bind('<Escape>', cancel_cal)
@@ -218,79 +224,86 @@ def show_tk(n_points: int, old_cal_inv: np.ndarray, new_cal: np.ndarray | None =
         if not sensitive:
             return
         sensitive = False
-    
-        sx, sy = point['sx'], point['sy']
-
-        ox, oy = event.x/X, event.y/Y  # old-calibrated
-        indicator(sx, sy, ox, oy, '#00F')
-
+        sx, sy = screen_points[index]
+        ox, oy = event.x/X, event.y/Y            # old-calibrated
         ux, uy = transform(ox, oy, old_cal_inv)  # uncalibrated
+        mouse_points[index] = ux, uy
+        indicator(sx, sy, ox, oy, '#00F')
         indicator(sx, sy, ux, uy, '#000')
 
         if new_cal is not None:
             nx, ny = transform(ux, uy, new_cal)  # new-calibrated (test only)
             indicator(sx, sy, nx, ny, '#0F0')
 
-        point.update({'mx': ux, 'my': uy})
-        points.append(point)
-        canvas.after(500, next_point)
+        canvas.after(500, next_point)  # click debounce delay
 
     canvas.bind('<Button-1>', click)
     root.mainloop()
-    return points
+    return mouse_points, screen_points
 
 
-def fit(screen_pts, mouse_pts, expected_rank: int = 3) -> tuple[
+def fit(
+    mouse_points: np.ndarray, screen_points: np.ndarray, expected_rank: int = 3,
+) -> tuple[
     np.ndarray,  # transform matrix
     float,       # quality metric
 ]:
-    m_screen = np.array([(*p, 1) for p in screen_pts])
-    m_mouse = np.array([(*p, 1) for p in mouse_pts])
-    m_transform, residuals, rank, singular = np.linalg.lstsq(m_mouse, m_screen, rcond=None)
+    homo_mouse = np.hstack((  # to homogeneous matrix
+        mouse_points,
+        np.ones_like(mouse_points, shape=(len(mouse_points), 1)),
+    ))
+    transform, residuals, rank, singular = np.linalg.lstsq(homo_mouse, screen_points, rcond=None)
     if rank != expected_rank:
-        print(f'Warning: Deficient transformation of rank {rank}. Please try calibrating again.')
-    quality = -np.log10(residuals.sum())
-    return m_transform, quality
+        print(f'Warning: deficient transformation of rank {rank}. Please try calibrating again.')
+    quality = -np.log10(residuals.mean())
+    return transform, quality
 
 
-def calibrate(points, disable_rot: bool) -> tuple[
+def calibrate(
+    mouse_points: np.ndarray, screen_points: np.ndarray, disable_rot: bool,
+) -> tuple[
     np.ndarray,  # new cal matrix
     float,       # quality metric
 ]:
     if disable_rot:
         '''
-        [mx ] [a]   [sx ]
-        [mx ] [e] = [sx ]
-        [...]       [...]
+        m_mouse @ m_transform = m_screen
+        [mx 1] [a]   [sx ]
+        [mx 1] [e] = [sx ]
+        [...]        [...]
         
-        [my ] [d]   [sy ]
-        [my ] [f] = [sy ]
-        [...]       [...]
+        [my 1] [d]   [sy ]
+        [my 1] [f] = [sy ]
+        [...1]       [...]
         '''
-        tx, qual_x = fit(screen_pts=((p['sx'],) for p in points),
-                         mouse_pts=((p['mx'],) for p in points),
-                         expected_rank=2)
-        ty, qual_y = fit(screen_pts=((p['sy'],) for p in points),
-                         mouse_pts=((p['my'],) for p in points),
-                         expected_rank=2)
-        m_transform = np.array([
-            [tx[0, 0], 0,        0],
-            [0,        ty[0, 0], 0],
-            [tx[1, 0], ty[1, 0], 1]])
+        (a, e), qual_x = fit(
+            mouse_points=mouse_points[:, :1],
+            screen_points=screen_points[:, 0], expected_rank=2,
+        )
+        (d, f), qual_y = fit(
+            mouse_points=mouse_points[:, 1:],
+            screen_points=screen_points[:, 1], expected_rank=2,
+        )
+        transform = np.array((
+            (a, 0),
+            (0, d),
+            (e, f),
+        ))
         quality = min(qual_x, qual_y)
     else:
         '''
-        m_mouse * m_transform = m_screen
+        m_mouse @ m_transform = m_screen
         [mx my 1] [a b]   [sx sy]
         [mx my 1] [c d] = [sx sy]
         [...    ] [e f]   [...  ]
         '''
-        m_transform, quality = fit(screen_pts=[(p['sx'], p['sy']) for p in points],
-                                   mouse_pts=[(p['mx'], p['my']) for p in points],
-                                   expected_rank=3)
-        m_transform[:, 2] = 0, 0, 1
+        transform, quality = fit(mouse_points, screen_points)
 
-    return m_transform.T, quality
+    transform = np.vstack((  # to homogeneous
+        transform.T,
+        [(0, 0, 1)],
+    ))
+    return transform, quality
 
 
 def use_cal(dev_id: int, prop_name: str, new_cal: np.ndarray) -> None:
@@ -352,9 +365,9 @@ def main() -> None:
         disable_rot = ask('Disable rotation and skew?')
         print()
 
-        points = show_tk(n_points, old_cal_inv)
-        if points:
-            new_cal, quality = calibrate(points, disable_rot)
+        mouse_points, screen_points = show_tk(n_points, old_cal_inv)
+        if len(mouse_points) >= 3:
+            new_cal, quality = calibrate(mouse_points, screen_points, disable_rot)
             print('New calibration:')
             print(new_cal)
             print(f'Quality (should be at least 3): {quality:.1f}')
