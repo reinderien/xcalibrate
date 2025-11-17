@@ -3,9 +3,15 @@ import datetime
 import locale
 import re
 import subprocess
+import typing
+
 import numpy as np
 
+if typing.TYPE_CHECKING:
+    import tkinter
 
+
+# Names of properties that could potentially have the calibration matrix, tested from top to bottom
 PROP_NAMES = (
     'libinput Calibration Matrix',       # libinput driver only
     'Coordinate Transformation Matrix',  # fallback, probably evdev driver
@@ -13,12 +19,18 @@ PROP_NAMES = (
 
 
 def xinput(*args: str) -> str:
+    """Run xinput with given args, check the exit code, and return its stdout"""
     return subprocess.check_output(
-        args=('/usr/bin/xinput', *args), text=True,
+        args=('/usr/bin/xinput',) + args, text=True,
     )
 
 
 def get_devs(pointer_only: bool = True) -> dict[int, str]:
+    """
+    List the xinput devices, parse out IDs and names, and (if pointer_only is true) only return
+    devices reported as a pointer. This doesn't work for all touchscreens - some report as a
+    keyboard.
+    """
     pattern = r'''(?xim)
         ^.*?           # line start, any (lazy) prefix
         (?P<name>      # greedy name, beginning with a letter,
@@ -31,12 +43,14 @@ def get_devs(pointer_only: bool = True) -> dict[int, str]:
         \s*
         \[?slave\s*%s  # must be a pointer device for pointer_only mode
     ''' % ('pointer' if pointer_only else '.+?')
-    stdout = xinput('--list', '--short')
-    matches = re.finditer(pattern, stdout)
-    return {int(match['id']): match['name'] for match in matches}
+    # stdout = xinput('--list', '--short')
+    # matches = re.finditer(pattern, stdout)
+    # return {int(match['id']): match['name'] for match in matches}
+    return {0: 'dummy device'}
 
 
 def print_devs(devs: dict[int, str]) -> None:
+    """Print device ID/name table"""
     print(f'{"ID":4s} {"Name":35s}')
     for i, name in sorted(devs.items()):
         print(f'{i:4d} {name:35s}')
@@ -44,6 +58,7 @@ def print_devs(devs: dict[int, str]) -> None:
 
 
 def choose_preferred(devs: dict[int, str]) -> int:
+    """Make a guess as to the most likely 'main touch' device"""
     preferred = next(
         (i for (i, n) in devs.items() if 'touch' in n.lower()),
         None,
@@ -54,6 +69,7 @@ def choose_preferred(devs: dict[int, str]) -> int:
 
 
 def choose_dev(devs: dict[int, str], preferred: int) -> int:
+    """Choose the device to calibrate"""
     while True:
         devstr = input(f'Device to calibrate [{preferred}]: ')
         if devstr == '':
@@ -67,6 +83,7 @@ def choose_dev(devs: dict[int, str], preferred: int) -> int:
 
 
 def read_prop(dev_id: int, names: tuple[str, ...]) -> tuple[str | None, str | None]:
+    """Call xinput to read the first property whose name matches any in 'names'."""
     names = '|'.join(re.escape(name) for name in names)
     pattern = r'''(?xim)
         ^\s*      # line start, greedy spaces
@@ -93,7 +110,10 @@ def read_cal(dev_id: int) -> tuple[
     np.ndarray,  # calibration
     np.ndarray,  # inverse calibration
 ]:
-    name, value = read_prop(dev_id, PROP_NAMES)
+    """Read the calibration matrix and parse it to a Numpy array."""
+    # name, value = read_prop(dev_id, PROP_NAMES)
+    name = 'libinput Calibration Matrix'
+    value = '1.6,0,-0.2,0,1.8,-0.3,0,0,1'
     if name is None:
         print(f'$ xinput --list-props {dev_id}')
         print('does not contain any of these properties:')
@@ -110,137 +130,216 @@ def read_cal(dev_id: int) -> tuple[
 
 
 def ask(q: str) -> bool:
+    """Ask a yes-or-no question"""
     do = input(q + ' [y]: ')
     return (do or 'y')[:1].lower() == 'y'
-
-
-def choose_points(p_min: int = 3, default: int = 4) -> int:
-    while True:
-        p_str = input(f'Point count (min {p_min}) [{default}]: ')
-        if p_str == '':
-            return default
-        try:
-            p = int(p_str)
-        except ValueError:
-            continue
-
-        if p >= p_min:
-            return p
 
 
 def transform(x: float, y: float, cal: np.ndarray) -> np.ndarray:
     return cal[:2, :] @ (x, y, 1)
 
 
-def show_tk(
-    n_points: int, old_cal_inv: np.ndarray, new_cal: np.ndarray | None = None,
-) -> tuple[
-    np.ndarray,  # normalised mouse points
-    np.ndarray,  # normalised screen points
-]:
-    import tkinter
-
-    root = tkinter.Tk()
-    X, Y = None, None
-    root.attributes('-fullscreen', True)
-    # as the above line doesn't work on all screens
-    # we also force the geometry to be the full size
-    w, h = root.winfo_screenwidth(), root.winfo_screenheight()
-    root.geometry(f'{w}x{h}')
-    canvas = tkinter.Canvas(root)
-
-    def resize(event: tkinter.Event) -> None:
-        nonlocal X, Y
-        X, Y = event.width, event.height
-        draw_legends()
-        next_point()
-    canvas.bind('<Configure>', resize)
-    canvas.pack(expand=True, fill='both')
-    legend_y = None
-
-    def legend(text: str, colour: str = '#000') -> None:
-        nonlocal legend_y
-        canvas.create_text(X/2, legend_y, text=text, fill=colour)
-        legend_y += 12
-
-    def draw_legends() -> None:
-        nonlocal legend_y
-        legend_y = Y * 0.3
-        legend('Esc to cancel.')
-        legend('Raw point in black')
-        legend('Old cal point in blue', '#00F')
-        legend('Target point in red', '#F00')
-        if new_cal is not None:
-            legend('New cal point in green', '#0F0')
-
-    index = -1
-    n_cols = int(np.ceil(np.sqrt(n_points)))
-    n_rows = int(np.ceil(n_points / n_cols))
-    screen_points = 0.1 + 0.8*np.stack(
-        np.divmod(  # returns y, x tuple
-            np.arange(n_points, dtype=np.float64),
-            n_cols,
-        ), axis=1,  # returns (n, 2=yx) array
-    )[:, ::-1]/(    # flip to (n, 2=xy) array
-        n_cols - 1, n_rows - 1,  # normalise
+class GUI:
+    RAW_COLOUR = '#000'
+    TRACE_COLOUR = '#CCC'
+    OLD_CAL_COLOUR = '#090'
+    NEW_CAL_COLOUR = '#0F0'
+    CURRENT_COLOUR = '#F00'
+    NEXT_COLOUR = '#00F'
+    
+    __slots__ = (
+        'old_cal_inv', 'new_cal', 'n_lines', 'index', 'prev_old', 'prev_touch',
+        'current_touch_points', 'all_touch_points',
+        'root', 'canvas', 'w', 'h', 'vertices', 'ab', 'line_ids',
     )
-    mouse_points = np.empty_like(screen_points)
-    sensitive = False
 
-    def next_point() -> None:
-        nonlocal index, sensitive
-        index += 1
-        sensitive = index < n_points
-        if sensitive:
-            draw_target(*screen_points[index])
+    def __init__(
+        self, old_cal_inv: np.ndarray, new_cal: np.ndarray | None = None, n_lines: int = 5,
+    ) -> None:
+        import tkinter
+
+        self.old_cal_inv = old_cal_inv
+        self.new_cal = new_cal
+        self.n_lines = n_lines
+        self.index = 0
+        self.prev_old: tuple[float | None, float | None] = None, None
+        self.prev_touch: tuple[float | None, float | None] = None, None
+        self.current_touch_points = []
+        self.all_touch_points = []
+
+        self.root = root = tkinter.Tk()
+        root.bind('<Escape>', self.cancel)
+
+        self.canvas = canvas = tkinter.Canvas(root, name='cal_canvas')
+        canvas.bind('<Configure>', self.resize)
+        canvas.bind('<Button-1>', self.touchdown)
+        canvas.bind('<B1-Motion>', self.touchmove)
+        canvas.bind('<ButtonRelease-1>', self.touchup)
+        canvas.bind('<Escape>', self.cancel)
+
+        root.attributes('-fullscreen', True)
+        # as the above line doesn't work on all screens we also force the geometry to be the full size
+        self.w = w = root.winfo_screenwidth()
+        self.h = h = root.winfo_screenheight()
+        root.geometry(f'{w}x{h}')
+
+        canvas.pack(expand=True, fill='both')
+
+        self.vertices, self.ab = self.make_vertices()
+        scaled = self.vertices*(w, h)
+        self.line_ids = tuple([
+            self.canvas.create_line(
+                *scaled[i], *scaled[(i + 1)%n_lines],
+                fill=self.TRACE_COLOUR, width=2,
+            )
+            for i in range(n_lines)
+        ])
+
+    def main_loop(self) -> None:
+        self.root.mainloop()
+
+    def make_vertices(self, aoffset: float = 0.1) -> tuple[np.ndarray, np.ndarray]:
+        n = self.n_lines
+        angles = np.linspace(
+            start=2*np.pi/n*aoffset, stop=2*np.pi*(1 - (1 - aoffset)/n), num=n,
+        )
+        radius = 0.4  # normalised
+        vertices = 0.5 + radius*np.stack((
+            np.cos(angles), np.sin(angles),
+        ))
+        vertices.flags.writeable = False
+
+        x0, y0 = vertices
+        x1, y1 = np.roll(vertices, shift=1, axis=1)
+        # To form ax + by = 1
+        ab = np.stack((y1-y0, x0-x1))/(x0*y1 - x1*y0)
+        ab.flags.writeable = False
+
+        return vertices.T, ab.T
+
+    def resize(self, event: 'tkinter.Event') -> None:
+        self.w = event.width
+        self.h = event.height
+        scaled = (self.w, self.h)*self.vertices
+        for i, (line, (x0, y0)) in enumerate(zip(self.line_ids, scaled)):
+            x1, y1 = scaled[(i + 1)%self.n_lines]
+            self.canvas.coords(line, x0, y0, x1, y1)
+
+        self.legend(0, 'Esc to cancel')
+        self.legend(1, 'Trace red line first', self.CURRENT_COLOUR)
+        self.legend(2, 'Trace blue line second', self.NEXT_COLOUR)
+        self.legend(3, 'Raw touch in black', self.RAW_COLOUR)
+        self.legend(4, 'Old cal output in dark green', self.OLD_CAL_COLOUR)
+        if self.new_cal is not None:
+            self.legend(5, 'New cal output in light green', self.NEW_CAL_COLOUR)
+
+        self.next_line()
+
+    def legend(self, y: int, text: str, colour: str = '#000') -> None:
+        self.canvas.create_text(0.5*self.w, 0.5*self.h + 12*y, text=text, fill=colour)
+
+    def finish_line(self) -> None:
+        index = self.index
+        print('Index', index)
+        self.canvas.itemconfigure(self.line_ids[index], fill=self.TRACE_COLOUR)
+        self.index = (index + 2)%self.n_lines
+
+    def next_line(self) -> None:
+        print('New index:', self.index)
+        if self.index == 0 and len(self.all_touch_points) > 0:
+            self.legend(6, 'Done, closing.')
+            self.root.after(1000, self.root.destroy)
         else:
-            root.after(1000, root.destroy)
+            self.current_touch_points = []
+            self.all_touch_points.append(self.current_touch_points)
+            self.canvas.itemconfigure(self.line_ids[self.index], fill=self.CURRENT_COLOUR)
+            self.canvas.itemconfigure(self.line_ids[(self.index + 2)%self.n_lines], fill=self.NEXT_COLOUR)
 
-    def cross(px: float, py: float, colour: str) -> None:
-        x, y = px*X, py*Y
-        canvas.create_line(x-10, y, x+10, y, fill=colour)
-        canvas.create_line(x, y-10, x, y+10, fill=colour)
-
-    def draw_target(px: float, py: float) -> None:
-        x, y = px*X, py*Y
-        canvas.create_oval(x-10, y-10, x+10, y+10, outline='#F00', width=3)
-        cross(px, py, '#F00')
-
-    def cancel_cal(_) -> None:
+    def cancel(self, event: 'tkinter.Event') -> None:
         print('Calibration cancelled')
-        nonlocal screen_points, mouse_points
-        screen_points, mouse_points = np.empty((2, 0, 2))
-        root.destroy()
+        # clear the calibrated points
+        self.root.destroy()
 
-    root.bind('<Escape>', cancel_cal)
-    canvas.bind('<Escape>', cancel_cal)
+    def indicator_segment(
+        self, x0: float, y0: float, x1: float, y1: float,
+        colour: str, trans: np.ndarray | None = None,
+    ) -> np.ndarray:
+        if trans is None:
+            xy1 = x1, y1
+        else:
+            xy = trans[:2, :] @ ((x0, x1),
+                                 (y0, y1),
+                                 ( 1,  1))
+            ((x0, x1),
+             (y0, y1)) = xy
+            xy1 = xy[:, 1]
+        w, h = self.w, self.h
+        self.canvas.create_line(x0*w, y0*h, x1*w, y1*h, width=1, fill=colour)
+        return xy1
 
-    def indicator(sx: float, sy: float, px: float, py: float, colour: str) -> None:
-        canvas.create_line(X*sx, Y*sy, X*px, Y*py, fill=colour)
-        cross(px, py, colour)
+    def touchdown(self, event: 'tkinter.Event') -> None:
+        ox, oy = event.x/self.w, event.y/self.h
+        ux, uy = self.old_cal_inv[:2, :] @ (ox, oy, 1)
+        if len(self.current_touch_points) >= 2:
+            x0, y0 = np.min(self.current_touch_points, axis=0)
+            x1, y1 = np.max(self.current_touch_points, axis=0)
+            dx = x1 - x0
+            dy = y1 - y0
+            print(f'{-0.5 * dx} < {ux - x0} < {1.5 * dx}')
+            print(f'{-0.5 * dy} < {uy - y0} < {1.5 * dy}')
+            print()
+            if (-0.5*dx < ux - x0 < 1.5*dx and   # -0.5 < (x - x0)/(x1 - x0) < 1.5
+                -0.5*dy < uy - y0 < 1.5*dy):
+                pass     # same polysegment; nothing to do
+            else:
+                self.finish_line()
+                self.next_line()
 
-    def click(event: tkinter.Event) -> None:
-        nonlocal sensitive
-        if not sensitive:
-            return
-        sensitive = False
-        sx, sy = screen_points[index]
-        ox, oy = event.x/X, event.y/Y            # old-calibrated
-        ux, uy = transform(ox, oy, old_cal_inv)  # uncalibrated
-        mouse_points[index] = ux, uy
-        indicator(sx, sy, ox, oy, '#00F')
-        indicator(sx, sy, ux, uy, '#000')
+        self.prev_old = ox, oy
+        self.prev_touch = ux, uy
+        self.current_touch_points.append(self.prev_touch)
 
-        if new_cal is not None:
-            nx, ny = transform(ux, uy, new_cal)  # new-calibrated (test only)
-            indicator(sx, sy, nx, ny, '#0F0')
+    def touchup(self, event: 'tkinter.Event') -> None:
+        uxy = np.concat(self.all_touch_points, axis=0)
+        ux, uy = uxy.T
+        idx = np.arange(0, 2*len(self.all_touch_points), 2) % self.n_lines
+        sab = np.repeat(self.ab[idx], [len(p) for p in self.all_touch_points], axis=0)
+        sa, sb = sab.T
+        lhs = np.stack(
+            (
+                sa*ux, sb*ux,
+                sa*uy, sb*uy,
+                sa, sb,
+            ), axis=1,
+        )
+        rhs = np.ones_like(ux)
+        trans, residuals, rank, singular = np.linalg.lstsq(a=lhs, b=rhs)
+        trans = trans.reshape((3, 2))
+        print('Trans:', trans)
+        print('Rank:', rank)
+        print('Singular:', singular)
 
-        canvas.after(500, next_point)  # click debounce delay
+        # Tests:
+        # (ux uy 1) @ trans = oxy (sxy)
+        oxy = np.stack(
+            (ux, uy, np.ones_like(ux)), axis=1,
+        ) @ trans
+        ones = np.einsum('ij,ij->i', oxy, sab)
+        print('U error extent:', ones.min() - 1, ones.max() - 1)
+        print()
 
-    canvas.bind('<Button-1>', click)
-    root.mainloop()
-    return mouse_points, screen_points
-
+    def touchmove(self, event: 'tkinter.Event') -> None:
+        w, h = self.w, self.h
+        ox0, oy0 = self.prev_old
+        ux0, uy0 = self.prev_touch
+        ox1, oy1 = event.x/w, event.y/h
+        ux1, uy1 = self.indicator_segment(ox0, oy0, ox1, oy1, self.RAW_COLOUR, self.old_cal_inv)
+        self.indicator_segment(ox0, oy0, ox1, oy1, self.OLD_CAL_COLOUR)
+        if self.new_cal is not None:
+            self.indicator_segment(ux0, uy0, ux1, uy1, self.NEW_CAL_COLOUR, self.new_cal)
+        self.prev_old = ox1, oy1
+        self.prev_touch = ux1, uy1
+        self.current_touch_points.append(self.prev_touch)
 
 def fit(
     mouse_points: np.ndarray, screen_points: np.ndarray, expected_rank: int = 3,
@@ -354,28 +453,27 @@ def main() -> None:
     
     print_devs(devs)
     preferred = choose_preferred(devs)
-    dev_id = choose_dev(devs, preferred)
+    dev_id = 0  # choose_dev(devs, preferred)
     print()
 
     cal_prop, old_cal, old_cal_inv = read_cal(dev_id)
 
     new_cal = None
-    if ask('Calibrate?'):
-        n_points = choose_points()
-        disable_rot = ask('Disable rotation and skew?')
+    disable_rot = False  # ask('Disable rotation and skew?')
+    print()
+
+    ui = GUI(old_cal_inv)
+    ui.main_loop()
+    raise NotImplementedError()
+    if len(mouse_points) >= 3:
+        new_cal, quality = calibrate(mouse_points, screen_points, disable_rot)
+        print('New calibration:')
+        print(new_cal)
+        print(f'Quality (should be at least 3): {quality:.1f}')
         print()
 
-        mouse_points, screen_points = show_tk(n_points, old_cal_inv)
-        if len(mouse_points) >= 3:
-            new_cal, quality = calibrate(mouse_points, screen_points, disable_rot)
-            print('New calibration:')
-            print(new_cal)
-            print(f'Quality (should be at least 3): {quality:.1f}')
-            print()
-
     if ask('Test?'):
-        n_points = choose_points()
-        show_tk(n_points, old_cal_inv, new_cal)
+        show_tk(n_lines, old_cal_inv, new_cal)
 
     if new_cal is not None and ask('Use calibration?'):
         use_cal(dev_id, cal_prop, new_cal)
