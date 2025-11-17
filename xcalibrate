@@ -44,9 +44,9 @@ def get_devs(pointer_only: bool = True) -> dict[int, str]:
         \[?slave\s*%s  # must be a pointer device for pointer_only mode
     ''' % ('pointer' if pointer_only else '.+?')
     # stdout = xinput('--list', '--short')
-    # matches = re.finditer(pattern, stdout)
-    # return {int(match['id']): match['name'] for match in matches}
-    return {0: 'dummy device'}
+    stdout = 'dummy device  id=0 [slave pointer]'
+    matches = re.finditer(pattern, stdout)
+    return {int(match['id']): match['name'] for match in matches}
 
 
 def print_devs(devs: dict[int, str]) -> None:
@@ -136,6 +136,7 @@ def ask(q: str) -> bool:
 
 
 def transform(x: float, y: float, cal: np.ndarray) -> np.ndarray:
+    """Transform x, y scalars by the given calibration matrix. Output is non-homogeneous."""
     return cal[:2, :] @ (x, y, 1)
 
 
@@ -143,12 +144,12 @@ class GUI:
     RAW_COLOUR = '#000'
     TRACE_COLOUR = '#CCC'
     OLD_CAL_COLOUR = '#090'
-    NEW_CAL_COLOUR = '#0F0'
+    NEW_CAL_COLOUR = '#F4F'
     CURRENT_COLOUR = '#F00'
     NEXT_COLOUR = '#00F'
     
     __slots__ = (
-        'old_cal_inv', 'new_cal', 'n_lines', 'index', 'prev_old', 'prev_touch',
+        'old_cal_inv', 'new_cal', 'testing', 'n_lines', 'index', 'prev_old', 'prev_touch',
         'current_touch_points', 'all_touch_points',
         'root', 'canvas', 'w', 'h', 'vertices', 'ab', 'line_ids',
     )
@@ -160,6 +161,7 @@ class GUI:
 
         self.old_cal_inv = old_cal_inv
         self.new_cal = new_cal
+        self.testing = new_cal is not None
         self.n_lines = n_lines
         self.index = 0
         self.prev_old: tuple[float | None, float | None] = None, None
@@ -199,6 +201,7 @@ class GUI:
         self.root.mainloop()
 
     def make_vertices(self, aoffset: float = 0.1) -> tuple[np.ndarray, np.ndarray]:
+        """Make vertices and edge linear parameters for the trace polygon"""
         n = self.n_lines
         angles = np.linspace(
             start=2*np.pi/n*aoffset, stop=2*np.pi*(1 - (1 - aoffset)/n), num=n,
@@ -218,6 +221,7 @@ class GUI:
         return vertices.T, ab.T
 
     def resize(self, event: 'tkinter.Event') -> None:
+        """Called on resize of the window (including when the window first appears)"""
         self.w = event.width
         self.h = event.height
         scaled = (self.w, self.h)*self.vertices
@@ -226,34 +230,29 @@ class GUI:
             self.canvas.coords(line, x0, y0, x1, y1)
 
         self.legend(0, 'Esc to cancel')
-        self.legend(1, 'Trace red line first', self.CURRENT_COLOUR)
-        self.legend(2, 'Trace blue line second', self.NEXT_COLOUR)
+        self.legend(1, 'Trace red line now', self.CURRENT_COLOUR)
+        self.legend(2, 'Trace blue line next', self.NEXT_COLOUR)
         self.legend(3, 'Raw touch in black', self.RAW_COLOUR)
-        self.legend(4, 'Old cal output in dark green', self.OLD_CAL_COLOUR)
-        if self.new_cal is not None:
-            self.legend(5, 'New cal output in light green', self.NEW_CAL_COLOUR)
+        self.legend(4, 'Old cal output in green', self.OLD_CAL_COLOUR)
+        self.legend(5, 'New cal output in purple', self.NEW_CAL_COLOUR)
 
         self.next_line()
 
     def legend(self, y: int, text: str, colour: str = '#000') -> None:
+        """Draw one text caption line"""
         self.canvas.create_text(0.5*self.w, 0.5*self.h + 12*y, text=text, fill=colour)
 
     def finish_line(self) -> None:
-        index = self.index
-        print('Index', index)
-        self.canvas.itemconfigure(self.line_ids[index], fill=self.TRACE_COLOUR)
-        self.index = (index + 2)%self.n_lines
+        """Complete the logic for this polygon edge"""
+        self.canvas.itemconfigure(self.line_ids[self.index], fill=self.TRACE_COLOUR)
+        self.index = (self.index + 2)%self.n_lines
 
     def next_line(self) -> None:
-        print('New index:', self.index)
-        if self.index == 0 and len(self.all_touch_points) > 0:
-            self.legend(6, 'Done, closing.')
-            self.root.after(1000, self.root.destroy)
-        else:
-            self.current_touch_points = []
-            self.all_touch_points.append(self.current_touch_points)
-            self.canvas.itemconfigure(self.line_ids[self.index], fill=self.CURRENT_COLOUR)
-            self.canvas.itemconfigure(self.line_ids[(self.index + 2)%self.n_lines], fill=self.NEXT_COLOUR)
+        """Activate the next polygon edge"""
+        self.current_touch_points = []
+        self.all_touch_points.append(self.current_touch_points)
+        self.canvas.itemconfigure(self.line_ids[self.index], fill=self.CURRENT_COLOUR)
+        self.canvas.itemconfigure(self.line_ids[(self.index + 2)%self.n_lines], fill=self.NEXT_COLOUR)
 
     def cancel(self, event: 'tkinter.Event') -> None:
         print('Calibration cancelled')
@@ -264,6 +263,10 @@ class GUI:
         self, x0: float, y0: float, x1: float, y1: float,
         colour: str, trans: np.ndarray | None = None,
     ) -> np.ndarray:
+        """
+        Draw one (potentially transformed) piece of a user trace; there will be many of these per
+        polygon edge
+        """
         if trans is None:
             xy1 = x1, y1
         else:
@@ -278,6 +281,10 @@ class GUI:
         return xy1
 
     def touchdown(self, event: 'tkinter.Event') -> None:
+        """
+        Called when the user starts a touch-drag. If this lands far enough away from the other
+        points in this segment, move to the next segment.
+        """
         ox, oy = event.x/self.w, event.y/self.h
         ux, uy = self.old_cal_inv[:2, :] @ (ox, oy, 1)
         if len(self.current_touch_points) >= 2:
@@ -285,13 +292,8 @@ class GUI:
             x1, y1 = np.max(self.current_touch_points, axis=0)
             dx = x1 - x0
             dy = y1 - y0
-            print(f'{-0.5 * dx} < {ux - x0} < {1.5 * dx}')
-            print(f'{-0.5 * dy} < {uy - y0} < {1.5 * dy}')
-            print()
-            if (-0.5*dx < ux - x0 < 1.5*dx and   # -0.5 < (x - x0)/(x1 - x0) < 1.5
-                -0.5*dy < uy - y0 < 1.5*dy):
-                pass     # same polysegment; nothing to do
-            else:
+            if not (-0.5*dx < ux - x0 < 1.5*dx and   # -0.5 < (x - x0)/(x1 - x0) < 1.5
+                    -0.5*dy < uy - y0 < 1.5*dy):
                 self.finish_line()
                 self.next_line()
 
@@ -300,33 +302,32 @@ class GUI:
         self.current_touch_points.append(self.prev_touch)
 
     def touchup(self, event: 'tkinter.Event') -> None:
-        uxy = np.concat(self.all_touch_points, axis=0)
-        ux, uy = uxy.T
-        idx = np.arange(0, 2*len(self.all_touch_points), 2) % self.n_lines
-        sab = np.repeat(self.ab[idx], [len(p) for p in self.all_touch_points], axis=0)
-        sa, sb = sab.T
-        lhs = np.stack(
-            (
-                sa*ux, sb*ux,
-                sa*uy, sb*uy,
-                sa, sb,
-            ), axis=1,
-        )
-        rhs = np.ones_like(ux)
-        trans, residuals, rank, singular = np.linalg.lstsq(a=lhs, b=rhs)
-        trans = trans.reshape((3, 2))
-        print('Trans:', trans)
-        print('Rank:', rank)
-        print('Singular:', singular)
+        """
+        Called when the user releases touch. This doesn't necessarily complete the segment. This is
+        used as a somewhat arbitrary time to update the new calibration matrix. If this happens
+        during the last segment, the calibration will complete.
+        """
+        if len(self.all_touch_points) >= 3:
+            uxy = np.concat(self.all_touch_points, axis=0)
+            ux, uy = uxy.T
+            idx = np.arange(0, 2*len(self.all_touch_points), 2) % self.n_lines
+            sab = np.repeat(self.ab[idx], [len(p) for p in self.all_touch_points], axis=0)
+            sa, sb = sab.T
+            lhs = np.stack(
+                (
+                    sa*ux, sb*ux,
+                    sa*uy, sb*uy,
+                    sa, sb,
+                ), axis=1,
+            )
+            rhs = np.ones_like(ux)
+            trans, residuals, rank, singular = np.linalg.lstsq(a=lhs, b=rhs)
+            trans = trans.reshape((3, 2))
+            self.new_cal = np.hstack((trans, [[0],[0],[1]]))
 
-        # Tests:
-        # (ux uy 1) @ trans = oxy (sxy)
-        oxy = np.stack(
-            (ux, uy, np.ones_like(ux)), axis=1,
-        ) @ trans
-        ones = np.einsum('ij,ij->i', oxy, sab)
-        print('U error extent:', ones.min() - 1, ones.max() - 1)
-        print()
+        if self.index == self.n_lines - 2:
+            self.legend(6, 'Done, closing.')
+            self.root.after(1000, self.root.destroy)
 
     def touchmove(self, event: 'tkinter.Event') -> None:
         w, h = self.w, self.h
@@ -341,17 +342,18 @@ class GUI:
         self.prev_touch = ux1, uy1
         self.current_touch_points.append(self.prev_touch)
 
+
 def fit(
-    mouse_points: np.ndarray, screen_points: np.ndarray, expected_rank: int = 3,
+    touch_points: np.ndarray, screen_points: np.ndarray, expected_rank: int = 3,
 ) -> tuple[
     np.ndarray,  # transform matrix
     float,       # quality metric
 ]:
-    homo_mouse = np.hstack((  # to homogeneous matrix
-        mouse_points,
-        np.ones_like(mouse_points, shape=(len(mouse_points), 1)),
+    homogenous_touch = np.hstack((
+        touch_points,
+        np.ones_like(touch_points, shape=(len(touch_points), 1)),
     ))
-    transform, residuals, rank, singular = np.linalg.lstsq(homo_mouse, screen_points, rcond=None)
+    transform, residuals, rank, singular = np.linalg.lstsq(homogenous_touch, screen_points, rcond=None)
     if rank != expected_rank:
         print(f'Warning: deficient transformation of rank {rank}. Please try calibrating again.')
     quality = -np.log10(residuals.mean())
@@ -359,14 +361,14 @@ def fit(
 
 
 def calibrate(
-    mouse_points: np.ndarray, screen_points: np.ndarray, disable_rot: bool,
+    touch_points: np.ndarray, screen_points: np.ndarray, disable_rot: bool,
 ) -> tuple[
     np.ndarray,  # new cal matrix
     float,       # quality metric
 ]:
     if disable_rot:
         '''
-        m_mouse @ m_transform = m_screen
+        m_touch @ m_transform = m_screen
         [mx 1] [a]   [sx ]
         [mx 1] [e] = [sx ]
         [...]        [...]
@@ -376,11 +378,11 @@ def calibrate(
         [...1]       [...]
         '''
         (a, e), qual_x = fit(
-            mouse_points=mouse_points[:, :1],
+            touch_points=touch_points[:, :1],
             screen_points=screen_points[:, 0], expected_rank=2,
         )
         (d, f), qual_y = fit(
-            mouse_points=mouse_points[:, 1:],
+            touch_points=touch_points[:, 1:],
             screen_points=screen_points[:, 1], expected_rank=2,
         )
         transform = np.array((
@@ -391,12 +393,12 @@ def calibrate(
         quality = min(qual_x, qual_y)
     else:
         '''
-        m_mouse @ m_transform = m_screen
+        m_touch @ m_transform = m_screen
         [mx my 1] [a b]   [sx sy]
         [mx my 1] [c d] = [sx sy]
         [...    ] [e f]   [...  ]
         '''
-        transform, quality = fit(mouse_points, screen_points)
+        transform, quality = fit(touch_points, screen_points)
 
     transform = np.vstack((  # to homogeneous
         transform.T,
@@ -465,8 +467,8 @@ def main() -> None:
     ui = GUI(old_cal_inv)
     ui.main_loop()
     raise NotImplementedError()
-    if len(mouse_points) >= 3:
-        new_cal, quality = calibrate(mouse_points, screen_points, disable_rot)
+    if len(touch_points) >= 3:
+        new_cal, quality = calibrate(touch_points, screen_points, disable_rot)
         print('New calibration:')
         print(new_cal)
         print(f'Quality (should be at least 3): {quality:.1f}')
