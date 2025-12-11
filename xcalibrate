@@ -151,23 +151,30 @@ class GUI:
     __slots__ = (
         'old_cal_inv', 'new_cal', 'testing', 'n_lines', 'index', 'prev_old', 'prev_touch',
         'current_touch_points', 'all_touch_points',
-        'root', 'canvas', 'w', 'h', 'vertices', 'ab', 'line_ids',
+        'root', 'canvas', 'w', 'h', 'vertices', 'ab', 'line_ids', 'quality', 'disable_rot',
     )
 
     def __init__(
         self, old_cal_inv: np.ndarray, new_cal: np.ndarray | None = None, n_lines: int = 5,
+        disable_rot: bool = True,
     ) -> None:
         import tkinter
 
-        self.old_cal_inv = old_cal_inv
-        self.new_cal = new_cal
-        self.testing = new_cal is not None
-        self.n_lines = n_lines
-        self.index = 0
+        self.old_cal_inv = old_cal_inv  # inverse of the old calibration matrix read from xinput
+        self.new_cal = new_cal          # if this is a test run, the calibrated matrix
+        self.testing = new_cal is not None  # is this a test run?
+        self.n_lines = n_lines          # number of line segments to trace
+        self.index = 0                  # of the currently traced segment
+        # single point: during drag, the previous point calibrated with the old matrix
         self.prev_old: tuple[float | None, float | None] = None, None
+        # single point: during drag, the previous raw (touch) point, uncalibrated
         self.prev_touch: tuple[float | None, float | None] = None, None
-        self.current_touch_points = []
-        self.all_touch_points = []
+        # list currently populating for the current segment, raw (touch) uncalibrated points
+        self.current_touch_points: list[tuple[float, float]] = []
+        # list of sublists of touch points, each sublist corresponding to a segment
+        self.all_touch_points: list[list[tuple[float, float]]] = []
+        self.quality = 0.
+        self.disable_rot = disable_rot
 
         self.root = root = tkinter.Tk()
         root.bind('<Escape>', self.cancel)
@@ -187,8 +194,12 @@ class GUI:
 
         canvas.pack(expand=True, fill='both')
 
+        # all form vertices, normalised, points by xy;
+        # segment edge line parameters, points by ab, ax + by = 1
         self.vertices, self.ab = self.make_vertices()
         scaled = self.vertices*(w, h)
+
+        # canvas item IDs for each segment
         self.line_ids = tuple([
             self.canvas.create_line(
                 *scaled[i], *scaled[(i + 1)%n_lines],
@@ -200,7 +211,13 @@ class GUI:
     def main_loop(self) -> None:
         self.root.mainloop()
 
-    def make_vertices(self, aoffset: float = 0.1) -> tuple[np.ndarray, np.ndarray]:
+    def make_vertices(
+        self,
+        aoffset: float = 0.1,  # angle offset, rotates the entire form
+    ) -> tuple[
+        np.ndarray,  # all form vertices, normalised, points by xy
+        np.ndarray,  # segment edge line parameters, points by ab, ax + by = 1
+    ]:
         """Make vertices and edge linear parameters for the trace polygon"""
         n = self.n_lines
         angles = np.linspace(
@@ -323,7 +340,8 @@ class GUI:
             rhs = np.ones_like(ux)
             trans, residuals, rank, singular = np.linalg.lstsq(a=lhs, b=rhs)
             trans = trans.reshape((3, 2))
-            self.new_cal = np.hstack((trans, [[0],[0],[1]]))
+            self.new_cal = np.hstack((trans, ([0],[0],[1])))
+            self.quality = -np.log10(residuals.mean())
 
         if self.index == self.n_lines - 2:
             self.legend(6, 'Done, closing.')
@@ -460,24 +478,25 @@ def main() -> None:
 
     cal_prop, old_cal, old_cal_inv = read_cal(dev_id)
 
-    new_cal = None
     disable_rot = False  # ask('Disable rotation and skew?')
     print()
 
-    ui = GUI(old_cal_inv)
+    ui = GUI(old_cal_inv, disable_rot=disable_rot)
     ui.main_loop()
-    raise NotImplementedError()
-    if len(touch_points) >= 3:
-        new_cal, quality = calibrate(touch_points, screen_points, disable_rot)
-        print('New calibration:')
-        print(new_cal)
-        print(f'Quality (should be at least 3): {quality:.1f}')
-        print()
+    if ui.new_cal is None:
+        return
+    new_cal = ui.new_cal
+
+    print('New calibration:')
+    print(new_cal)
+    print(f'Quality (should be at least 3): {ui.quality:.1f}')
+    print()
 
     if ask('Test?'):
-        show_tk(n_lines, old_cal_inv, new_cal)
+        ui = GUI(old_cal_inv, new_cal)
+        ui.main_loop()
 
-    if new_cal is not None and ask('Use calibration?'):
+    if ask('Use calibration?'):
         use_cal(dev_id, cal_prop, new_cal)
         if ask('Write example xorg conf for persistence?'):
             write_xorg_config(dev_id, devs[dev_id], cal_prop, new_cal)
