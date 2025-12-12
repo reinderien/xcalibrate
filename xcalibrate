@@ -43,8 +43,7 @@ def get_devs(pointer_only: bool = True) -> dict[int, str]:
         \s*
         \[?slave\s*%s  # must be a pointer device for pointer_only mode
     ''' % ('pointer' if pointer_only else '.+?')
-    # stdout = xinput('--list', '--short')
-    stdout = 'dummy device  id=0 [slave pointer]'
+    stdout = xinput('--list', '--short')
     matches = re.finditer(pattern, stdout)
     return {int(match['id']): match['name'] for match in matches}
 
@@ -111,9 +110,7 @@ def read_cal(dev_id: int) -> tuple[
     np.ndarray,  # inverse calibration
 ]:
     """Read the calibration matrix and parse it to a Numpy array."""
-    # name, value = read_prop(dev_id, PROP_NAMES)
-    name = 'libinput Calibration Matrix'
-    value = '1.6,0,-0.2,0,1.8,-0.3,0,0,1'
+    name, value = read_prop(dev_id, PROP_NAMES)
     if name is None:
         print(f'$ xinput --list-props {dev_id}')
         print('does not contain any of these properties:')
@@ -473,12 +470,12 @@ def main() -> None:
     
     print_devs(devs)
     preferred = choose_preferred(devs)
-    dev_id = 0  # choose_dev(devs, preferred)
+    dev_id = choose_dev(devs, preferred)
     print()
 
     cal_prop, old_cal, old_cal_inv = read_cal(dev_id)
 
-    disable_rot = False  # ask('Disable rotation and skew?')
+    disable_rot = ask('Disable rotation and skew?')
     print()
 
     ui = GUI(old_cal_inv, disable_rot=disable_rot)
