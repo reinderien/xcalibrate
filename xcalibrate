@@ -271,7 +271,7 @@ class GUI:
     def cancel(self, event: 'tkinter.Event') -> None:
         print('Calibration cancelled')
         # clear the calibrated points
-        self.root.destroy()
+        self.quit()
 
     def indicator_segment(
         self, x0: float, y0: float, x1: float, y1: float,
@@ -315,6 +315,7 @@ class GUI:
             x1, y1 = np.max(self.current_touch_points, axis=0)
             dx = x1 - x0
             dy = y1 - y0
+
             if not (-0.5*dx < ux - x0 < 1.5*dx and   # -0.5 < (x - x0)/(x1 - x0) < 1.5
                     -0.5*dy < uy - y0 < 1.5*dy):
                 self.finish_line()
@@ -351,7 +352,7 @@ class GUI:
 
         if self.index == self.n_lines - 2 and self.enough_points():
             self.legend(6, 'Done, closing.')
-            self.root.after(1000, self.root.destroy)
+            self.root.after(1000, self.quit)
 
     def touchmove(self, event: 'tkinter.Event') -> None:
         w, h = self.w, self.h
@@ -365,6 +366,10 @@ class GUI:
         self.prev_old = ox1, oy1
         self.prev_touch = ux1, uy1
         self.current_touch_points.append(self.prev_touch)
+
+    def quit(self) -> None:
+        self.root.withdraw()
+        self.root.quit()
 
 
 def fit(
