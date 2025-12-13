@@ -294,6 +294,15 @@ class GUI:
         self.canvas.create_line(x0*w, y0*h, x1*w, y1*h, width=1, fill=colour)
         return xy1
 
+    def enough_points(self) -> bool:
+        if len(self.all_touch_points) <= 1:
+            mean = 100
+        else:
+            mean = sum(
+                len(seg) for seg in self.all_touch_points
+            )/len(self.all_touch_points)
+        return len(self.current_touch_points) >= 0.75*mean
+        
     def touchdown(self, event: 'tkinter.Event') -> None:
         """
         Called when the user starts a touch-drag. If this lands far enough away from the other
@@ -301,7 +310,7 @@ class GUI:
         """
         ox, oy = event.x/self.w, event.y/self.h
         ux, uy = self.old_cal_inv[:2, :] @ (ox, oy, 1)
-        if len(self.current_touch_points) >= 2:
+        if self.enough_points():
             x0, y0 = np.min(self.current_touch_points, axis=0)
             x1, y1 = np.max(self.current_touch_points, axis=0)
             dx = x1 - x0
@@ -340,7 +349,7 @@ class GUI:
             self.new_cal = np.hstack((trans, ([0],[0],[1])))
             self.quality = -np.log10(residuals.mean())
 
-        if self.index == self.n_lines - 2:
+        if self.index == self.n_lines - 2 and self.enough_points():
             self.legend(6, 'Done, closing.')
             self.root.after(1000, self.root.destroy)
 
