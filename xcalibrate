@@ -6,6 +6,7 @@ import subprocess
 import numpy as np
 
 
+# Names of properties that could potentially have the calibration matrix, tested from top to bottom
 PROP_NAMES = (
     'libinput Calibration Matrix',       # libinput driver only
     'Coordinate Transformation Matrix',  # fallback, probably evdev driver
@@ -13,12 +14,18 @@ PROP_NAMES = (
 
 
 def xinput(*args: str) -> str:
+    """Run xinput with given args, check the exit code, and return its stdout"""
     return subprocess.check_output(
-        args=('/usr/bin/xinput', *args), text=True,
+        args=('/usr/bin/xinput',) + args, text=True,
     )
 
 
 def get_devs(pointer_only: bool = True) -> dict[int, str]:
+    """
+    List the xinput devices, parse out IDs and names, and (if pointer_only is true) only return
+    devices reported as a pointer. This doesn't work for all touchscreens - some report as a
+    keyboard.
+    """
     pattern = r'''(?xim)
         ^.*?           # line start, any (lazy) prefix
         (?P<name>      # greedy name, beginning with a letter,
@@ -37,6 +44,7 @@ def get_devs(pointer_only: bool = True) -> dict[int, str]:
 
 
 def print_devs(devs: dict[int, str]) -> None:
+    """Print device ID/name table"""
     print(f'{"ID":4s} {"Name":35s}')
     for i, name in sorted(devs.items()):
         print(f'{i:4d} {name:35s}')
@@ -44,6 +52,7 @@ def print_devs(devs: dict[int, str]) -> None:
 
 
 def choose_preferred(devs: dict[int, str]) -> int:
+    """Make a guess as to the most likely 'main touch' device"""
     preferred = next(
         (i for (i, n) in devs.items() if 'touch' in n.lower()),
         None,
@@ -54,6 +63,7 @@ def choose_preferred(devs: dict[int, str]) -> int:
 
 
 def choose_dev(devs: dict[int, str], preferred: int) -> int:
+    """Choose the device to calibrate"""
     while True:
         devstr = input(f'Device to calibrate [{preferred}]: ')
         if devstr == '':
@@ -67,6 +77,7 @@ def choose_dev(devs: dict[int, str], preferred: int) -> int:
 
 
 def read_prop(dev_id: int, names: tuple[str, ...]) -> tuple[str | None, str | None]:
+    """Call xinput to read the first property whose name matches any in 'names'."""
     names = '|'.join(re.escape(name) for name in names)
     pattern = r'''(?xim)
         ^\s*      # line start, greedy spaces
@@ -93,6 +104,7 @@ def read_cal(dev_id: int) -> tuple[
     np.ndarray,  # calibration
     np.ndarray,  # inverse calibration
 ]:
+    """Read the calibration matrix and parse it to a Numpy array."""
     name, value = read_prop(dev_id, PROP_NAMES)
     if name is None:
         print(f'$ xinput --list-props {dev_id}')
@@ -110,6 +122,7 @@ def read_cal(dev_id: int) -> tuple[
 
 
 def ask(q: str) -> bool:
+    """Ask a yes-or-no question"""
     do = input(q + ' [y]: ')
     return (do or 'y')[:1].lower() == 'y'
 
@@ -129,6 +142,7 @@ def choose_points(p_min: int = 3, default: int = 4) -> int:
 
 
 def transform(x: float, y: float, cal: np.ndarray) -> np.ndarray:
+    """Transform x, y scalars by the given calibration matrix. Output is non-homogeneous."""
     return cal[:2, :] @ (x, y, 1)
 
 
@@ -243,16 +257,16 @@ def show_tk(
 
 
 def fit(
-    mouse_points: np.ndarray, screen_points: np.ndarray, expected_rank: int = 3,
+    touch_points: np.ndarray, screen_points: np.ndarray, expected_rank: int = 3,
 ) -> tuple[
     np.ndarray,  # transform matrix
     float,       # quality metric
 ]:
-    homo_mouse = np.hstack((  # to homogeneous matrix
-        mouse_points,
-        np.ones_like(mouse_points, shape=(len(mouse_points), 1)),
+    homogenous_touch = np.hstack((
+        touch_points,
+        np.ones_like(touch_points, shape=(len(touch_points), 1)),
     ))
-    transform, residuals, rank, singular = np.linalg.lstsq(homo_mouse, screen_points, rcond=None)
+    transform, residuals, rank, singular = np.linalg.lstsq(homogenous_touch, screen_points, rcond=None)
     if rank != expected_rank:
         print(f'Warning: deficient transformation of rank {rank}. Please try calibrating again.')
     quality = -np.log10(residuals.mean())
@@ -260,14 +274,14 @@ def fit(
 
 
 def calibrate(
-    mouse_points: np.ndarray, screen_points: np.ndarray, disable_rot: bool,
+    touch_points: np.ndarray, screen_points: np.ndarray, disable_rot: bool,
 ) -> tuple[
     np.ndarray,  # new cal matrix
     float,       # quality metric
 ]:
     if disable_rot:
         '''
-        m_mouse @ m_transform = m_screen
+        m_touch @ m_transform = m_screen
         [mx 1] [a]   [sx ]
         [mx 1] [e] = [sx ]
         [...]        [...]
@@ -277,11 +291,11 @@ def calibrate(
         [...1]       [...]
         '''
         (a, e), qual_x = fit(
-            mouse_points=mouse_points[:, :1],
+            touch_points=touch_points[:, :1],
             screen_points=screen_points[:, 0], expected_rank=2,
         )
         (d, f), qual_y = fit(
-            mouse_points=mouse_points[:, 1:],
+            touch_points=touch_points[:, 1:],
             screen_points=screen_points[:, 1], expected_rank=2,
         )
         transform = np.array((
@@ -292,12 +306,12 @@ def calibrate(
         quality = min(qual_x, qual_y)
     else:
         '''
-        m_mouse @ m_transform = m_screen
+        m_touch @ m_transform = m_screen
         [mx my 1] [a b]   [sx sy]
         [mx my 1] [c d] = [sx sy]
         [...    ] [e f]   [...  ]
         '''
-        transform, quality = fit(mouse_points, screen_points)
+        transform, quality = fit(touch_points, screen_points)
 
     transform = np.vstack((  # to homogeneous
         transform.T,
